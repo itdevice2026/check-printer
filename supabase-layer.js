@@ -183,44 +183,99 @@ renderCompanies = function (force) {
   });
 };
 
-/* ---------- payees (saved automatically when a check is issued) ---------- */
+/* ---------- payees: own tab, manual add/edit, and auto-save when a check is issued ---------- */
+const payKey = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+const findPayee = name => { const k = payKey(name); return k ? CP_PAYEES.find(p => payKey(p.name) === k) : null; };
+async function addPayee(v) {
+  const row = {name: String(v.name || '').trim().replace(/\s+/g, ' '), tin: (v.tin || '').trim() || null, address: (v.address || '').trim() || null};
+  if (!row.name) throw new Error('Enter the payee name.');
+  if (findPayee(row.name)) { const e = new Error('That payee is already saved.'); e.code = '23505'; throw e; }
+  try { const r = await must(SB.from('cp_payees').insert(row).select().single()); applyRow('cp_payees', r); audit('Added payee', row.name); return r; }
+  catch (err) { if (err.code === '23505') err.message = 'That payee is already saved.'; throw err; }
+}
+// Tab button + panel
+if (!document.querySelector('.tabs [data-tab="payees"]')) {
+  document.querySelector('.tabs [data-tab="register"]').insertAdjacentHTML('afterend', '<button role="tab" data-tab="payees">Payees</button>');
+  document.querySelector('#tab-register').insertAdjacentHTML('afterend', '<section id="tab-payees" data-panel="payees" hidden></section>');
+  document.querySelector('.tabs [data-tab="payees"]').addEventListener('click', () => { app.tab = 'payees'; try { history.replaceState(null, '', '#payees'); } catch {} renderAll(true); });
+  if (location.hash === '#payees') app.tab = 'payees';
+}
 const _renderAll = renderAll;
 renderAll = function (force) {
   _renderAll(force);
-  const pi = $('#w-payee'); if (pi) pi.placeholder = 'Type a name, or choose a saved payee';
-  const dl = $('#payees'); if (!dl) return;
-  dl.innerHTML = CP_PAYEES.slice().sort((a, b) => (b.use_count - a.use_count) || a.name.localeCompare(b.name)).slice(0, 2000).map(p => `<option value="${esc(p.name)}">${p.use_count ? 'used ' + p.use_count + '×' : 'saved'}</option>`).join('');
+  if (app.tab === 'payees') renderPayees(force);
+  const dl = $('#payees'); if (dl) dl.innerHTML = CP_PAYEES.slice().sort((a, b) => (b.use_count - a.use_count) || a.name.localeCompare(b.name)).slice(0, 2000).map(p => `<option value="${esc(p.name)}">${p.use_count ? 'used ' + p.use_count + '×' : 'saved'}</option>`).join('');
+  const pi = $('#w-payee'); if (!pi) return;
+  pi.placeholder = 'Type a name, or choose a saved payee';
+  if (!$('#cp-psave')) {
+    pi.closest('.clr-wrap').insertAdjacentHTML('afterend', `<span id="cp-pline" class="hint" style="display:flex;gap:8px;align-items:center;min-height:26px"><span id="cp-pstat"></span><button type="button" class="btn sm" id="cp-psave" style="display:none">+ Save to payees</button><a id="cp-pmanage" style="cursor:pointer;margin-left:auto">Manage payees</a></span>`);
+    pi.addEventListener('input', payeeHint);
+    $('#cp-psave').addEventListener('click', async e => {
+      e.preventDefault(); e.stopPropagation(); const b = e.currentTarget; b.disabled = true;
+      try { await addPayee({name: $('#w-payee').value}); toast('Payee saved. It will appear in the Payee selection.'); } catch (err) { toast(err.message, 'warn'); }
+      b.disabled = false; payeeHint();
+    });
+    $('#cp-pmanage').addEventListener('click', e => { e.preventDefault(); go('payees'); });
+  }
+  payeeHint();
 };
-let cpPayQ = '', cpPayDel = null;
+function payeeHint() {
+  const v = $('#w-payee')?.value || '', s = $('#cp-psave'), st = $('#cp-pstat'); if (!s) return;
+  const p = findPayee(v);
+  s.style.display = (!v.trim() || p) ? 'none' : '';
+  st.textContent = p ? '✓ Saved payee' + (p.tin ? ' · TIN ' + p.tin : '') : (v.trim() ? 'New payee' : `${CP_PAYEES.length} saved payee${CP_PAYEES.length === 1 ? '' : 's'}`);
+}
+
+let cpPayQ = '', cpPayDel = null, cpPayEdit = null;
 function payeeRows() {
   const q = cpPayQ.trim().toLowerCase(), isAdmin = CP_ROLE === 'admin';
-  const list = CP_PAYEES.filter(p => !q || p.name.toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name));
-  return list.slice(0, 300).map(p => `<tr><td>${esc(p.name)}</td><td class="r mono">${p.use_count}</td><td class="mono">${esc(p.last_used || '—')}</td><td>${isAdmin ? (cpPayDel === p.id ? `<button class="btn sm danger" data-pdel-ok="${p.id}">Confirm remove</button>` : `<button class="btn sm" data-pdel="${p.id}">Remove</button>`) : ''}</td></tr>`).join('')
-    || `<tr><td colspan="4" class="empty">${CP_PAYEES.length ? 'No payee matches.' : 'Payees are added here automatically when you issue a check.'}</td></tr>`;
+  const list = CP_PAYEES.filter(p => !q || [p.name, p.tin, p.address].some(x => (x || '').toLowerCase().includes(q))).sort((a, b) => a.name.localeCompare(b.name));
+  return list.slice(0, 500).map(p => `<tr><td><b>${esc(p.name)}</b>${p.address ? `<div class="hint">${esc(p.address)}</div>` : ''}</td><td class="mono">${esc(p.tin || '')}</td><td class="r mono">${p.use_count}</td><td class="mono">${esc(p.last_used || '—')}</td>
+    <td style="white-space:nowrap"><button class="btn sm" data-puse="${p.id}" title="Start a check to this payee">Use</button> <button class="btn sm" data-pedit="${p.id}">Edit</button> ${isAdmin ? (cpPayDel === p.id ? `<button class="btn sm danger" data-pdel-ok="${p.id}">Confirm remove</button>` : `<button class="btn sm" data-pdel="${p.id}">Remove</button>`) : ''}</td></tr>`).join('')
+    || `<tr><td colspan="5" class="empty">${CP_PAYEES.length ? 'No payee matches.' : 'No payees yet. Add one on the left, or issue a check and its payee is saved automatically.'}</td></tr>`;
 }
-const _renderCompanies2 = renderCompanies;
-renderCompanies = function (force) {
-  _renderCompanies2(force);
-  const host = $('#tab-companies .split > .form'); if (!host) return;
-  if ($('#cp-payees')) { $('#cp-plist').innerHTML = payeeRows(); $('#cp-pcount').textContent = CP_PAYEES.length; return; }
-  host.insertAdjacentHTML('beforeend', `<div class="card form" id="cp-payees"><div class="sec-head"><h2>Payees</h2><span class="hint"><span id="cp-pcount">${CP_PAYEES.length}</span> saved · added automatically when a check is issued</span></div>
-    <div class="row"><label class="f">Search<input id="cp-pq" placeholder="Type a name" value="${esc(cpPayQ)}"></label><form id="cp-padd" style="display:contents"><label class="f">Add a payee<input id="cp-pname" placeholder="Name as printed, then Enter"></label></form></div>
-    <div class="table-wrap" style="border:0;max-height:340px;overflow:auto"><table class="t"><thead><tr><th>Payee</th><th class="r">Checks</th><th>Last used</th><th></th></tr></thead><tbody id="cp-plist">${payeeRows()}</tbody></table></div></div>`);
+function renderPayees(force) {
+  const el = $('#tab-payees'); if (!el) return;
+  if ($('#cp-payees') && !force) { $('#cp-plist').innerHTML = payeeRows(); $('#cp-pcount').textContent = CP_PAYEES.length; return; }
+  const ed = cpPayEdit ? CP_PAYEES.find(p => p.id === cpPayEdit) : null; if (!ed) cpPayEdit = null;
+  el.innerHTML = `<div class="split" id="cp-payees">
+    <form id="cp-padd" class="card form" autocomplete="off"><div class="sec-head"><h2>${ed ? 'Edit payee' : 'Add payee'}</h2></div>
+      <label class="f">Payee name (as printed on the check)<input id="cp-pname" required maxlength="120" value="${esc(ed?.name || '')}" placeholder="e.g. ABC Meat Supply Inc."></label>
+      <label class="f">TIN (optional)<input id="cp-ptin" maxlength="30" value="${esc(ed?.tin || '')}" placeholder="000-000-000-000"></label>
+      <label class="f">Address (optional)<input id="cp-paddr" maxlength="200" value="${esc(ed?.address || '')}"></label>
+      <div class="actions"><button class="btn primary" type="submit">${ed ? 'Save changes' : 'Add payee'}</button>${ed ? '<button class="btn" type="button" id="cp-pcancel">Cancel</button>' : ''}</div>
+      <p class="hint" style="margin:0">Payees are also saved automatically each time a check is issued. Saved payees appear as choices in the Payee field of Write check.</p>
+    </form>
+    <div><div class="sec-head" style="margin-bottom:10px"><h2>Payees</h2><span class="hint"><span id="cp-pcount">${CP_PAYEES.length}</span> saved</span></div>
+      <label class="f" style="margin-bottom:10px">Search<input id="cp-pq" placeholder="Name, TIN or address" value="${esc(cpPayQ)}"></label>
+      <div class="table-wrap"><table class="t"><thead><tr><th>Payee</th><th>TIN</th><th class="r">Checks</th><th>Last used</th><th></th></tr></thead><tbody id="cp-plist">${payeeRows()}</tbody></table></div></div></div>`;
   $('#cp-pq').addEventListener('input', e => { cpPayQ = e.target.value; $('#cp-plist').innerHTML = payeeRows(); });
+  $('#cp-pcancel')?.addEventListener('click', () => { cpPayEdit = null; renderPayees(true); });
   $('#cp-padd').addEventListener('submit', async e => {
-    e.preventDefault(); const name = $('#cp-pname').value.trim().replace(/\s+/g, ' '); if (!name) return;
-    try { applyRow('cp_payees', await must(SB.from('cp_payees').insert({name}).select().single())); $('#cp-pname').value = ''; toast('Payee saved.'); audit('Added payee', name); }
-    catch (err) { toast(err.code === '23505' ? 'That payee is already saved.' : err.message, 'warn'); }
+    e.preventDefault(); const btn = e.submitter; if (btn) btn.disabled = true;
+    const v = {name: $('#cp-pname').value, tin: $('#cp-ptin').value, address: $('#cp-paddr').value};
+    try {
+      if (ed) {
+        const name = v.name.trim().replace(/\s+/g, ' '); if (!name) throw new Error('Enter the payee name.');
+        const dup = findPayee(name); if (dup && dup.id !== ed.id) throw new Error('Another saved payee already has that name.');
+        const r = await must(SB.from('cp_payees').update({name, tin: v.tin.trim() || null, address: v.address.trim() || null}).eq('id', ed.id).select().single());
+        applyRow('cp_payees', r); audit('Updated payee', name); toast('Payee updated.'); cpPayEdit = null;
+      } else { await addPayee(v); toast('Payee added.'); }
+      renderPayees(true); $('#cp-pname')?.focus();
+    } catch (err) { toast(err.code === '23505' ? 'Another saved payee already has that name.' : err.message, 'warn'); if (btn) btn.disabled = false; }
   });
   $('#cp-payees').addEventListener('click', async e => {
+    const u = e.target.closest('[data-puse]');
+    if (u) { const p = CP_PAYEES.find(x => x.id === u.dataset.puse); if (p) { app.draft.payee = p.name; go('write'); toast('Payee filled in: ' + p.name); } return; }
+    const ed1 = e.target.closest('[data-pedit]'); if (ed1) { cpPayEdit = ed1.dataset.pedit; renderPayees(true); window.scrollTo({top: 0}); $('#cp-pname').focus(); return; }
     const d1 = e.target.closest('[data-pdel]'); if (d1) { cpPayDel = d1.dataset.pdel; $('#cp-plist').innerHTML = payeeRows(); return; }
     const d2 = e.target.closest('[data-pdel-ok]'); if (!d2) return;
     const id = d2.dataset.pdelOk, p = CP_PAYEES.find(x => x.id === id);
-    try { const rows = await must(SB.from('cp_payees').delete().eq('id', id).select('id')); if (!rows.length) throw new Error('Only an administrator can remove payees.'); applyRow('cp_payees', {id}, true); audit('Removed payee', p?.name || ''); }
+    try { const rows = await must(SB.from('cp_payees').delete().eq('id', id).select('id')); if (!rows.length) throw new Error('Only an administrator can remove payees.'); applyRow('cp_payees', {id}, true); audit('Removed payee', p?.name || ''); toast('Payee removed.'); }
     catch (err) { writeErr(err); }
-    cpPayDel = null; if ($('#cp-plist')) $('#cp-plist').innerHTML = payeeRows();
+    cpPayDel = null; if (cpPayEdit === id) cpPayEdit = null; if ($('#cp-plist')) $('#cp-plist').innerHTML = payeeRows();
   });
-};
+}
 
 /* ---------- header: who is signed in ---------- */
 const _renderTop = renderTop;
