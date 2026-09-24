@@ -134,7 +134,7 @@ async function loadAll() {
 /* ---------- sign-in screen ---------- */
 function gate(html) {
   let g = $('#cp-gate');
-  if (!g) { g = document.createElement('div'); g.id = 'cp-gate'; document.body.appendChild(g); }
+  if (!g) { g = document.createElement('div'); g.id = 'cp-gate'; document.body.insertBefore(g, document.getElementById('cp-credit')); }
   g.hidden = !html; g.innerHTML = html || ''; $('.app').hidden = !!html;
 }
 const brandHtml = `<div class="brand" style="margin:0 0 6px"><svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect x="1" y="7" width="32" height="20" rx="3" fill="var(--accent)"/><path d="M5 20h11M5 23h7" stroke="var(--accent-ink)" stroke-width="1.6" stroke-linecap="round"/><rect x="21" y="11" width="8" height="5" rx="1" fill="none" stroke="var(--accent-ink)" stroke-width="1.4"/></svg><div><h1>Check Printer</h1><small>Meatplus group of companies</small></div></div>`;
@@ -207,6 +207,11 @@ document.head.insertAdjacentHTML('beforeend', `<style id="cp-pay-css">
 #cp-pmanage:hover span{transform:translateX(3px)}
 #cp-pmanage:focus-visible{outline:2px solid var(--focus,var(--accent));outline-offset:2px}
 </style>`);
+/* ---------- programmer credit (shown on the sign-in screen and in the app) ---------- */
+if (!document.getElementById('cp-credit')) {
+  document.head.insertAdjacentHTML('beforeend', '<meta name="author" content="Nomer Sta Ana"><style>#cp-credit{text-align:center;font-size:12px;color:var(--muted);padding:18px 16px 26px;margin-top:24px;border-top:1px solid var(--line)}#cp-credit b{color:var(--ink);font-weight:600}</style>');
+  document.body.insertAdjacentHTML('beforeend', '<footer id="cp-credit">Meatplus Check Printer System \u00b7 Programmer: <b>Nomer Sta Ana</b></footer>');
+}
 const _renderAll = renderAll;
 renderAll = function (force) {
   _renderAll(force);
