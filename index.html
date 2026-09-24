@@ -860,13 +860,15 @@ function renderRegister() {
       (r.status === 'Issued' ? `<button class="btn sm" data-act="Released" data-k="${key}">Released</button>` : '') +
       (r.status !== 'Cleared' ? `<button class="btn sm" data-act="Cleared" data-k="${key}">Cleared</button>` : '') +
       `<button class="btn sm danger" data-act="void" data-k="${key}">Void</button>`;
-    let h = `<tr class="${st === 'Voided' ? 'void' : ''}"><td class="mono">${r.noStr}</td><td class="mono">${r.date}</td><td>${esc(r.payee || '—')}${r.voidReason ? `<div class="hint">Void: ${esc(r.voidReason)}</div>` : ''}${r.acPayee ? `<div class="hint">A/C payee only</div>` : ''}</td><td class="r mono amt">${peso(r.amount)}</td><td>${esc(a ? bankName(a.bank) : '—')}<div class="hint mono">${esc(a?.number || '')}</div></td><td class="mono">${esc(r.cvNo || '')}</td><td><span class="st st-${st}">${st}</span>${r.printed > 1 ? `<div class="hint">printed ${r.printed}×</div>` : ''}</td><td><div class="rowacts">${acts}</div></td></tr>`;
+    let h = `<tr class="${st === 'Voided' ? 'void' : ''}"><td class="mono">${r.noStr}</td><td class="mono">${r.date}</td><td>${esc(r.payee || '—')}${r.voidReason ? `<div class="hint">Void: ${esc(r.voidReason)}</div>` : ''}${r.acPayee ? `<div class="hint">A/C payee only</div>` : ''}</td><td class="r mono amt">${peso(r.amount)}</td><td>${esc(a ? bankName(a.bank) : '—')}<div class="hint mono">${esc(a?.number || '')}</div></td><td class="mono">${esc(r.cvNo || '')}</td><td><span class="st st-${st}">${st}</span>${r.printed > 1 ? `<div class="hint">printed ${r.printed}×</div>` : ''}</td><td><div class="rowacts">${acts}${canDelete() && (r.status === 'Issued' || r.status === 'Voided') ? `<button class="btn sm" data-act="reissue" data-k="${key}" title="Delete this entry and load it into Write check to issue it again">Re-issue</button><button class="btn sm danger" data-act="delete" data-k="${key}" title="Delete this entry from the register">Delete</button>` : ''}</div></td></tr>`;
+    if (app.delOpen?.key === key) h += `<tr class="voidrow"><td colspan="8"><form class="actions" data-delform="${key}"><b>${app.delOpen.reissue ? 'Delete and re-issue' : 'Delete'} check ${r.noStr}?</b><span class="hint" style="color:inherit">${app.delOpen.reissue ? 'The entry is removed and its details are loaded into Write check, so you can correct them and issue the same check number again.' : 'The entry is removed from the register and the check number can be used again.'} The deleted details are kept in the audit log.</span><input id="del-reason" placeholder="Reason (required)" style="max-width:280px" required><button class="btn sm danger">${app.delOpen.reissue ? 'Delete & re-issue' : 'Delete entry'}</button><button type="button" class="btn sm" data-act="canceldel">Keep</button></form></td></tr>`;
     if (app.voidOpen === key) h += `<tr class="voidrow"><td colspan="8"><form class="actions" data-voidform="${key}"><b>Void check ${r.noStr}?</b><input id="void-reason" placeholder="Reason (required)" style="max-width:320px" required><button class="btn sm danger">Confirm void</button><button type="button" class="btn sm" data-act="cancelvoid">Keep check</button></form></td></tr>`;
     return h;
   }).join('');
   $('#r-body').innerHTML = body || `<tr><td colspan="8" class="empty">${allChecks().length ? 'No checks match these filters.' : 'No checks yet. Issue one from <a data-go="write" style="cursor:pointer;text-decoration:underline">Write check</a>.'}</td></tr>`;
   if (rows.length > 500) $('#r-body').insertAdjacentHTML('beforeend', `<tr><td colspan="8" class="hint">Showing the latest 500 of ${rows.length}. Narrow the filters or export to Excel for all.</td></tr>`);
   const vf = $('[data-voidform]'); if (vf) { vf.addEventListener('submit', voidSubmit); $('#void-reason').focus(); }
+  const df = $('[data-delform]'); if (df) { df.addEventListener('submit', delSubmit); $('#del-reason').focus(); }
   // summary
   $('#r-sum').innerHTML = accts.map(a => {
     const rs = rows.filter(r => r.accountId === a.id); const left = Math.max(0, (+a.seriesTo || 0) - (+a.nextNo || 0) + 1); const tot = (+a.seriesTo - +a.seriesFrom + 1) || 1;
@@ -878,6 +880,8 @@ async function regAction(e) {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const act = b.dataset.act;
   if (act === 'cancelvoid') { app.voidOpen = null; renderRegister(); return; }
+  if (act === 'canceldel') { app.delOpen = null; renderRegister(); return; }
+  if (act === 'delete' || act === 'reissue') { app.delOpen = {key: b.dataset.k, reissue: act === 'reissue'}; app.voidOpen = null; renderRegister(); return; }
   const [acctId, n] = b.dataset.k.split('|'); const no = +n; const r = findCheck(acctId, no); const a = S.accounts[acctId];
   if (act === 'void') { app.voidOpen = b.dataset.k; renderRegister(); return; }
   const stamp = new Date().toISOString();
@@ -885,6 +889,32 @@ async function regAction(e) {
     await patch('checks', bucketId(acctId, no), {checks: {[no]: act === 'Released' ? {status: 'Released', releasedAt: stamp} : {status: 'Cleared', clearedAt: stamp}}});
     audit('Marked ' + act.toLowerCase(), `${bankName(a?.bank)} #${padNo(a, no)} · ${r?.payee}`);
   } catch (err) { writeErr(err); }
+}
+// Delete a check entry (Issued or Voided only) so it can be corrected and issued again.
+function canDelete() { return true; }
+async function deleteCheck(acctId, no, reason) {
+  const a = S.accounts[acctId]; const bid = bucketId(acctId, no); const b = S.checks[bid]; const r = b?.checks?.[no]; if (!r) return null;
+  const rest = {...b.checks}; delete rest[no];
+  await put('checks', bid, {accountId: acctId, checks: rest});
+  if (a && no === (+a.nextNo || 0) - 1) await patch('accounts', acctId, {nextNo: no});
+  audit('Deleted check', `${bankName(a?.bank)} #${padNo(a, no)} · ${r.payee || 'spoiled leaf'} · ₱${peso(r.amount)} · CV ${r.cvNo || '-'} · reason: ${reason}`);
+  return r;
+}
+async function delSubmit(e) {
+  e.preventDefault(); const [acctId, n] = e.target.dataset.delform.split('|'); const no = +n; const reason = $('#del-reason').value.trim();
+  if (!reason) { $('#del-reason').focus(); return; }
+  const reissue = app.delOpen?.reissue; const a = S.accounts[acctId];
+  let r; try { r = await deleteCheck(acctId, no, reason); } catch (err) { writeErr(err); return; }
+  app.delOpen = null;
+  if (!r) { renderRegister(); return; }
+  toast(`Check ${padNo(a, no)} deleted from the register.`);
+  if (!reissue) { renderRegister(); return; }
+  const d = newDraft(acctId);
+  Object.assign(d, {no: String(no), noAuto: false, date: r.date || todayISO(), payee: r.payee || '', amount: r.amount ? peso(r.amount) : '', particulars: r.particulars || '', cvNo: r.cvNo || '', cvAuto: !r.cvNo, acPayee: !!r.acPayee, alsoVoucher: app.draft.alsoVoucher});
+  if (r.entries?.length) d.entries = r.entries.map(x => ({acct: x.acct || '', dr: x.dr ? String(x.dr) : '', cr: x.cr ? String(x.cr) : ''}));
+  if (app.company !== 'ALL' && app.company !== r.companyId) { app.company = 'ALL'; lsSet('mtc-co', 'ALL'); }
+  app.draft = d; app.last = null; go('write');
+  toast('Loaded into Write check. Correct the details, then issue it again.');
 }
 async function voidSubmit(e) {
   e.preventDefault(); const [acctId, n] = e.target.dataset.voidform.split('|'); const no = +n; const reason = $('#void-reason').value.trim();
