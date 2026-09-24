@@ -187,7 +187,7 @@ renderCompanies = function (force) {
 const payKey = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
 const findPayee = name => { const k = payKey(name); return k ? CP_PAYEES.find(p => payKey(p.name) === k) : null; };
 async function addPayee(v) {
-  const row = {name: String(v.name || '').trim().replace(/\s+/g, ' '), tin: (v.tin || '').trim() || null, address: (v.address || '').trim() || null};
+  const row = {name: String(v.name || '').trim().replace(/\s+/g, ' '), tin: (v.tin || '').trim() || null};
   if (!row.name) throw new Error('Enter the payee name.');
   if (findPayee(row.name)) { const e = new Error('That payee is already saved.'); e.code = '23505'; throw e; }
   try { const r = await must(SB.from('cp_payees').insert(row).select().single()); applyRow('cp_payees', r); audit('Added payee', row.name); return r; }
@@ -229,8 +229,8 @@ function payeeHint() {
 let cpPayQ = '', cpPayDel = null, cpPayEdit = null;
 function payeeRows() {
   const q = cpPayQ.trim().toLowerCase(), isAdmin = CP_ROLE === 'admin';
-  const list = CP_PAYEES.filter(p => !q || [p.name, p.tin, p.address].some(x => (x || '').toLowerCase().includes(q))).sort((a, b) => a.name.localeCompare(b.name));
-  return list.slice(0, 500).map(p => `<tr><td><b>${esc(p.name)}</b>${p.address ? `<div class="hint">${esc(p.address)}</div>` : ''}</td><td class="mono">${esc(p.tin || '')}</td><td class="r mono">${p.use_count}</td><td class="mono">${esc(p.last_used || '—')}</td>
+  const list = CP_PAYEES.filter(p => !q || [p.name, p.tin].some(x => (x || '').toLowerCase().includes(q))).sort((a, b) => a.name.localeCompare(b.name));
+  return list.slice(0, 500).map(p => `<tr><td><b>${esc(p.name)}</b></td><td class="mono">${esc(p.tin || '')}</td><td class="r mono">${p.use_count}</td><td class="mono">${esc(p.last_used || '—')}</td>
     <td style="white-space:nowrap"><button class="btn sm" data-puse="${p.id}" title="Start a check to this payee">Use</button> <button class="btn sm" data-pedit="${p.id}">Edit</button> ${isAdmin ? (cpPayDel === p.id ? `<button class="btn sm danger" data-pdel-ok="${p.id}">Confirm remove</button>` : `<button class="btn sm" data-pdel="${p.id}">Remove</button>`) : ''}</td></tr>`).join('')
     || `<tr><td colspan="5" class="empty">${CP_PAYEES.length ? 'No payee matches.' : 'No payees yet. Add one on the left, or issue a check and its payee is saved automatically.'}</td></tr>`;
 }
@@ -242,23 +242,22 @@ function renderPayees(force) {
     <form id="cp-padd" class="card form" autocomplete="off"><div class="sec-head"><h2>${ed ? 'Edit payee' : 'Add payee'}</h2></div>
       <label class="f">Payee name (as printed on the check)<input id="cp-pname" required maxlength="120" value="${esc(ed?.name || '')}" placeholder="e.g. ABC Meat Supply Inc."></label>
       <label class="f">TIN (optional)<input id="cp-ptin" maxlength="30" value="${esc(ed?.tin || '')}" placeholder="000-000-000-000"></label>
-      <label class="f">Address (optional)<input id="cp-paddr" maxlength="200" value="${esc(ed?.address || '')}"></label>
       <div class="actions"><button class="btn primary" type="submit">${ed ? 'Save changes' : 'Add payee'}</button>${ed ? '<button class="btn" type="button" id="cp-pcancel">Cancel</button>' : ''}</div>
       <p class="hint" style="margin:0">Payees are also saved automatically each time a check is issued. Saved payees appear as choices in the Payee field of Write check.</p>
     </form>
     <div><div class="sec-head" style="margin-bottom:10px"><h2>Payees</h2><span class="hint"><span id="cp-pcount">${CP_PAYEES.length}</span> saved</span></div>
-      <label class="f" style="margin-bottom:10px">Search<input id="cp-pq" placeholder="Name, TIN or address" value="${esc(cpPayQ)}"></label>
+      <label class="f" style="margin-bottom:10px">Search<input id="cp-pq" placeholder="Name or TIN" value="${esc(cpPayQ)}"></label>
       <div class="table-wrap"><table class="t"><thead><tr><th>Payee</th><th>TIN</th><th class="r">Checks</th><th>Last used</th><th></th></tr></thead><tbody id="cp-plist">${payeeRows()}</tbody></table></div></div></div>`;
   $('#cp-pq').addEventListener('input', e => { cpPayQ = e.target.value; $('#cp-plist').innerHTML = payeeRows(); });
   $('#cp-pcancel')?.addEventListener('click', () => { cpPayEdit = null; renderPayees(true); });
   $('#cp-padd').addEventListener('submit', async e => {
     e.preventDefault(); const btn = e.submitter; if (btn) btn.disabled = true;
-    const v = {name: $('#cp-pname').value, tin: $('#cp-ptin').value, address: $('#cp-paddr').value};
+    const v = {name: $('#cp-pname').value, tin: $('#cp-ptin').value};
     try {
       if (ed) {
         const name = v.name.trim().replace(/\s+/g, ' '); if (!name) throw new Error('Enter the payee name.');
         const dup = findPayee(name); if (dup && dup.id !== ed.id) throw new Error('Another saved payee already has that name.');
-        const r = await must(SB.from('cp_payees').update({name, tin: v.tin.trim() || null, address: v.address.trim() || null}).eq('id', ed.id).select().single());
+        const r = await must(SB.from('cp_payees').update({name, tin: v.tin.trim() || null}).eq('id', ed.id).select().single());
         applyRow('cp_payees', r); audit('Updated payee', name); toast('Payee updated.'); cpPayEdit = null;
       } else { await addPayee(v); toast('Payee added.'); }
       renderPayees(true); $('#cp-pname')?.focus();
