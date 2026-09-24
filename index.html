@@ -337,37 +337,75 @@ function buildItems(L, d, measure) {
 }
 
 /* ---------- check leaf preview (SVG, millimetre units) ---------- */
+// Look of each bank's pre-printed leaf, taken from Meatplus Check Samples 1-2 (preview only; the bank prints these).
+const BANK_THEME = {
+  BDO:  {bg: '#DDEBF7', pat: '#AFCDE7', ink: '#2F6DB3', box: false, mark: 'bdo'},
+  CBC:  {bg: '#FCF9F2', pat: '#F1D2CD', ink: '#333333', band: '#D9534F', box: true, mark: 'cbc'},
+  BPI:  {bg: '#F9F2CF', pat: '#EEDF9C', ink: '#333333', box: false, mark: 'bpi'},
+  UBP:  {bg: '#F8EECD', pat: '#ECDBA4', ink: '#333333', box: true, mark: 'ubp'},
+  PBB:  {bg: '#E6F3F2', pat: '#BCDDDD', ink: '#2F5FA0', box: true, mark: 'pbb'},
+  SECB: {bg: '#E3F0F8', pat: '#BAD8EA', ink: '#333333', box: true, mark: 'secb', printedAcct: true}
+};
+const DEFAULT_THEME = {bg: '#EEF4F0', pat: '#BFD6CA', ink: '#3F6B8A', box: true, mark: ''};
+function leafDecor(L, d, W, H, pid) {
+  const F = L.fields, T = BANK_THEME[L.bank] || DEFAULT_THEME, ink = T.ink, FF = 'font-family="Arial, Helvetica, sans-serif"';
+  const tx = (x, y, sz, t, ex = '', c = ink) => `<text x="${x}" y="${y}" font-size="${sz}" fill="${c}" ${FF} ${ex}>${esc(t)}</text>`;
+  const ln = (x1, y1, x2, y2, w = .2) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${ink}" stroke-width="${w}"/>`;
+  const box = (x, y, w, h) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="rgba(255,255,255,.55)" stroke="${ink}" stroke-width=".18" stroke-dasharray="${T.box ? 'none' : '.6 .3'}"/>`;
+  let s = `<defs><pattern id="${pid}" width="7" height="2.6" patternUnits="userSpaceOnUse"><path d="M0 1.3 Q1.75 0 3.5 1.3 T7 1.3" fill="none" stroke="${T.pat}" stroke-width="0.25"/></pattern></defs>`;
+  s += `<rect width="${W}" height="${H}" rx="1" fill="${T.bg}"/><rect width="${W}" height="${H}" rx="1" fill="url(#${pid})" opacity=".7"/>`;
+  // header: account no., account name, check no., BRSTN
+  if (T.band) s += `<rect x="0" y="0.9" width="${W - 6}" height="4.4" fill="${T.band}"/>`;
+  const lab = (x, t, ex = '') => tx(x, 4.2, 2.1, t, ex + (T.band ? ' font-weight="700"' : ''), T.band ? '#FFFFFF' : ink);
+  s += lab(7, 'ACCOUNT No.') + lab(50, 'ACCOUNT NAME') + lab(148.5, 'CHECK No.') + lab(W - 7, 'BRSTN', 'text-anchor="end"');
+  const acct = d.acctNo || '000-00-00000-0', br = String(d.brstn || '').replace(/\D/g, '');
+  s += T.box ? `<rect x="6.5" y="5.7" width="${Math.max(24, acct.length * 2.1 + 2.4)}" height="4" fill="#1E1E1E"/>` + tx(7.6, 8.9, 3, acct, 'font-weight="700" letter-spacing=".35"', '#FFFFFF')
+             : tx(7, 8.9, 3.1, acct, 'font-weight="500" letter-spacing=".2"', '#222222');
+  s += tx(50, 8.3, 2.9, (d.acctName || 'ACCOUNT NAME').toUpperCase(), 'font-weight="700"', '#222222');
+  s += tx(148.5, 8.9, 3.4, d.noStr || '0000000000', 'font-weight="900" letter-spacing=".15"', '#222222');
+  s += tx(W - 7, 7.3, 2.4, br.slice(0, 5) || '00000', 'text-anchor="end"', '#222222') + tx(W - 7, 10, 2.4, br.slice(5) || '0000', 'text-anchor="end"', '#222222');
+  // date
+  if (F.date.show && F.date.mode === 'boxes') {
+    const sp = +F.date.spacing, order = F.date.order === 'DMY' ? 'DDMMYYYY' : F.date.order === 'YMD' ? 'YYYYMMDD' : 'MMDDYYYY';
+    let x = +F.date.x; const y = +F.date.y; let i = 0;
+    [2, 2, 4].forEach((n, g) => { for (let j = 0; j < n; j++) { s += `<rect x="${x - (sp - .5) / 2}" y="${y - 4.6}" width="${sp - .5}" height="6" fill="rgba(255,255,255,.6)" stroke="${ink}" stroke-width=".16" stroke-dasharray=".5 .25"/>` + tx(x, y + 3.2, 1.6, order[i], 'text-anchor="middle"'); x += sp; i++; } if (g < 2) s += tx(x - sp / 2 + +F.date.groupGap / 2, y - 2.6, 2.4, '-', 'text-anchor="middle" font-weight="700"'); x += +F.date.groupGap; });
+    s += tx(+F.date.x - sp / 2 - 0.8, y + 1, 2.6, 'DATE', 'text-anchor="end"');
+  } else if (F.date.show) {
+    s += tx(+F.date.x - 2, +F.date.y, 2.6, 'DATE', 'text-anchor="end"') + ln(+F.date.x, +F.date.y + 1.3, W - 8, +F.date.y + 1.3);
+  }
+  // payee, amount, words
+  s += tx(7, +F.payee.y - 2.2, 3, 'PAY TO THE', 'font-weight="700"') + tx(7, +F.payee.y + 1.8, 3, 'ORDER  OF', 'font-weight="700"');
+  s += ln(27.5, +F.payee.y + 2.5, +F.amount.x - 14.5, +F.payee.y + 2.5);
+  s += tx(+F.amount.x - 13.2, +F.amount.y, 3.4, '₱', 'font-weight="700"');
+  s += box(+F.amount.x - 11.4, +F.amount.y - 4.8, W - 9.5 - (+F.amount.x - 11.4), 7);
+  s += tx(7, +F.words.y + 2.6, 3, 'PESOS', 'font-weight="700"') + ln(19.5, +F.words.y + 3, W - 9.5, +F.words.y + 3);
+  s += tx(W - 9.5, +F.words.y + 5.6, 1.85, `I / We allow the electronic clearing of this check and hereby waive the presentation for payment of this original to ${bankName(L.bank)}.`, 'text-anchor="end" font-style="italic"');
+  if (T.printedAcct) s += tx(W - 15, +F.words.y + 10.6, 4.3, acct, 'text-anchor="end" font-weight="900"', '#222222');
+  // bank name (text only)
+  const M = {
+    bdo: `<text x="7" y="46" font-size="10" font-weight="900" ${FF} letter-spacing="-.4"><tspan fill="#1D4F9E">BD</tspan><tspan fill="#F2C12E">O</tspan></text>`,
+    cbc: `<rect x="7" y="38.6" width="7" height="7" rx="1.2" fill="#D63B34"/><rect x="9" y="40.6" width="3" height="3" fill="#FCF9F2"/>` + tx(15.5, 45, 5.8, 'Chinabank', 'font-weight="700"', '#D63B34'),
+    bpi: tx(7, 41.5, 3.7, 'BANK OF THE', 'font-weight="900"', '#E1473C') + tx(7, 45.6, 3.7, 'PHILIPPINE ISLANDS', 'font-weight="900"', '#E1473C'),
+    ubp: `<rect x="7" y="38.8" width="6.5" height="6.5" rx="1.6" fill="#F39A1E"/>` + tx(15, 45, 5.6, 'UnionBank', 'font-weight="700"', '#555555'),
+    pbb: tx(20, 38.9, 1.8, 'P H I L I P P I N E', 'font-style="italic" font-weight="700"', '#2F4F9A') + tx(18, 44, 5.3, 'BUSINESSBANK', 'font-style="italic" font-weight="900"', '#2F4F9A') + tx(32, 46.6, 1.9, 'a savings bank', 'font-style="italic"', '#1FA38A') + `<rect x="8" y="38.6" width="8.5" height="7" rx="1.8" fill="#1FA38A"/>`,
+    secb: tx(7, 45.5, 7.4, 'SECURITY BANK', 'font-weight="900"', '#2B7BD6')
+  };
+  s += M[T.mark] || tx(7, 44.5, 4.6, bankName(L.bank).toUpperCase(), 'font-weight="900"');
+  s += tx(7, 51, 2.2, d.branch ? d.branch.toUpperCase() + ' BRANCH' : bankName(L.bank).toUpperCase() + ' BRANCH', 'font-weight="700"', '#222222');
+  // signature boxes
+  s += box(97.5, 42.5, 44.5, 11.5) + box(148.5, 42.5, 44.5, 11.5);
+  s += tx(119.75, 56.2, 1.8, 'AUTHORIZED SIGNATURE(S)', 'text-anchor="middle"') + tx(170.75, 56.2, 1.8, 'AUTHORIZED SIGNATURE(S)', 'text-anchor="middle"');
+  s += `<text transform="translate(4.4 49) rotate(-90)" font-size="1.9" fill="${ink}" ${FF}>DOCUMENTARY STAMPS PAID</text>`;
+  // MICR line
+  s += `<text x="24" y="68.6" font-size="3.7" fill="#1A1A1A" font-family="IBM Plex Mono, Consolas, monospace" letter-spacing=".5">⑈${esc(d.noStr || '0000000000')}⑈ ${esc(br.slice(0, 5) || '00000')}⑉${esc(br.slice(5) || '0000')}⑆ ${esc(acct.replace(/\D/g, ''))}⑈  000</text>`;
+  return s;
+}
 let leafSeq = 0;
 function leafSVG(L, d, opt = {}) {
   const W = +L.checkW, H = +L.checkH, F = L.fields, k = 0.352778;
   const items = buildItems(L, d, (t, s) => measureCanvas(t, s, L.bold));
   const pid = 'gl' + (++leafSeq);
-  let s = `<svg class="leaf" viewBox="0 0 ${W} ${H}" role="img" aria-label="Check preview"><defs><pattern id="${pid}" width="9" height="3.2" patternUnits="userSpaceOnUse"><path d="M0 1.6 Q2.25 0 4.5 1.6 T9 1.6" fill="none" stroke="var(--leaf-pattern)" stroke-width="0.22"/></pattern></defs>`;
-  s += `<rect width="${W}" height="${H}" rx="1.4" fill="var(--leaf)"/><rect width="${W}" height="${H}" rx="1.4" fill="url(#${pid})" opacity=".75"/>`;
-  // pre-printed elements (indicative only; the bank prints these)
-  const pp = (x, y, sz, t, extra = '') => `<text class="pp" x="${x}" y="${y}" font-size="${sz}" ${extra}>${esc(t)}</text>`;
-  const ln = (x1, y1, x2, y2, w = .18) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--leaf-ink)" stroke-width="${w}"/>`;
-  s += `<g opacity=".85">`;
-  s += pp(6, 8, 3.4, bankName(L.bank).toUpperCase(), 'font-weight="700" letter-spacing=".15"');
-  if (d.acctLabel) s += pp(6, 11.4, 2, d.acctLabel);
-  s += pp(W - 6, 8, 3, 'No. ' + (d.noStr || '0000000000'), 'text-anchor="end" font-family="IBM Plex Mono, monospace"');
-  const dateItems = items.filter(i => i.field === 'date');
-  if (F.date.show && F.date.mode === 'boxes') {
-    const sp = +F.date.spacing, order = F.date.order === 'DMY' ? 'DDMMYYYY' : F.date.order === 'YMD' ? 'YYYYMMDD' : 'MMDDYYYY';
-    let x = +F.date.x; const y = +F.date.y; let i = 0;
-    [2, 2, 4].forEach(n => { for (let j = 0; j < n; j++) { s += `<rect x="${x - (sp - .7) / 2}" y="${y - 4.6}" width="${sp - .7}" height="6.2" fill="none" stroke="var(--leaf-ink)" stroke-width=".18"/>` + pp(x, y + 3.6, 1.7, order[i], 'text-anchor="middle"'); x += sp; i++; } x += +F.date.groupGap; });
-    s += pp(+F.date.x - sp / 2 - 1.5, y, 2.4, 'DATE', 'text-anchor="end"');
-  } else if (F.date.show) {
-    s += pp(+F.date.x - 2, +F.date.y, 2.4, 'DATE', 'text-anchor="end"') + ln(+F.date.x, +F.date.y + 1.3, W - 8, +F.date.y + 1.3);
-  }
-  s += pp(6, +F.payee.y - 2.5, 2.1, 'PAY TO THE') + pp(6, +F.payee.y, 2.1, 'ORDER OF');
-  s += ln(+F.payee.x - 2, +F.payee.y + 1.3, +F.amount.x - 8, +F.payee.y + 1.3);
-  s += `<rect x="${+F.amount.x - 2.5}" y="${+F.amount.y - 5}" width="${Math.max(10, W - 5 - (+F.amount.x - 2.5))}" height="7" fill="none" stroke="var(--leaf-ink)" stroke-width=".2" rx=".6"/>`;
-  s += pp(+F.amount.x - 3.8, +F.amount.y, 3.4, '₱', 'text-anchor="end" font-weight="600"');
-  s += pp(6, +F.words.y + 2.2, 2.6, 'PESOS', 'font-weight="600"') + ln(19, +F.words.y + 2.2, W - 10, +F.words.y + 2.2);
-  s += ln(W - 74, H - 17, W - 8, H - 17) + pp(W - 41, H - 14, 1.8, 'AUTHORIZED SIGNATURE(S)', 'text-anchor="middle" letter-spacing=".2"');
-  s += pp(W / 2, H - 5, 3.3, `⑈${d.noStr || '0000000000'}⑈  ⑆${d.brstn || '000000000'}⑆  ${d.acctNo || '000000000000'}⑈`, 'text-anchor="middle" font-family="IBM Plex Mono, monospace" letter-spacing=".5"');
-  s += `</g>`;
+  let s = `<svg class="leaf" viewBox="0 0 ${W} ${H}" role="img" aria-label="Check preview">` + leafDecor(L, d, W, H, pid);
   // printed items
   s += `<g class="${opt.editable ? 'edit' : ''}">`;
   for (const it of items) {
@@ -615,7 +653,7 @@ function renderAll(force) {
 function writeData(d, acct) {
   const amount = parseAmt(d.amount);
   return {date: d.date, payee: d.payee.trim(), amount, words: d.words, particulars: d.particulars, cvNo: d.cvNo, acPayee: d.acPayee,
-    noStr: acct ? padNo(acct, +d.no || 0) : '', acctNo: acct?.number || '', brstn: (acct?.brstn || '').replace(/\D/g, ''), acctLabel: acct ? (acct.name || '') + (acct.branch ? ' · ' + acct.branch + ' Branch' : '') : ''};
+    noStr: acct ? padNo(acct, +d.no || 0) : '', acctNo: acct?.number || '', acctName: acct?.name || '', branch: acct?.branch || '', brstn: (acct?.brstn || '').replace(/\D/g, ''), acctLabel: acct ? (acct.name || '') + (acct.branch ? ' · ' + acct.branch + ' Branch' : '') : ''};
 }
 function syncDraftAuto() {
   const d = app.draft; const accts = accountList();
@@ -725,7 +763,7 @@ function updateWrite(refreshSelect) {
   const lay = L || getLayout('std-BDO');
   $('#w-layname').textContent = lay.name;
   const data = writeData(d, acct);
-  const show = data.amount || data.payee ? data : {...sampleData(lay), noStr: data.noStr || '0000123456', acctLabel: data.acctLabel, acctNo: data.acctNo || '001234567890', brstn: data.brstn};
+  const show = data.amount || data.payee ? data : {...sampleData(lay), noStr: data.noStr || '0000123456', acctLabel: data.acctLabel, acctNo: data.acctNo || '001234567890', brstn: data.brstn, acctName: data.acctName, branch: data.branch};
   $('#w-leaf').innerHTML = leafSVG(lay, show);
   if (!(data.amount || data.payee)) $('#w-layname').textContent = lay.name + ' · sample data shown';
   // messages
@@ -1087,7 +1125,9 @@ function layoutInput(e) {
 function selectField(f) { if (app.layoutSel === f) return; app.layoutSel = f; $$('[data-fg]').forEach(g => g.classList.toggle('on', g.dataset.fg === f)); }
 function refreshLayoutPreview() {
   const L = app.layoutDraft; if (!$('#l-leaf')) return;
-  $('#l-leaf').innerHTML = leafSVG(L, sampleData(L), {editable: true, selected: app.layoutSel});
+  const u = accountList('ALL').find(a => (a.layoutId || 'std-' + a.bank) === app.layoutId);
+  const sd = {...sampleData(L), ...(u ? {acctNo: u.number, acctName: u.name, branch: u.branch, brstn: u.brstn, noStr: padNo(u, u.nextNo)} : {})};
+  $('#l-leaf').innerHTML = leafSVG(L, sd, {editable: true, selected: app.layoutSel});
   const F = L.fields[app.layoutSel]; $('#l-pos').textContent = F ? `${app.layoutSel}  x ${r1(+F.x)}  y ${r1(+F.y)} mm` : '';
 }
 let drag = null;
