@@ -211,6 +211,7 @@ document.head.insertAdjacentHTML('beforeend', `<style id="cp-pay-css">
 if (!document.getElementById('cp-credit')) {
   document.head.insertAdjacentHTML('beforeend', '<meta name="author" content="Nomer Sta Ana"><style>#cp-credit{text-align:center;font-size:12px;color:var(--muted);padding:18px 16px 26px;margin-top:24px;border-top:1px solid var(--line)}#cp-credit b{color:var(--ink);font-weight:600}</style>');
   document.body.insertAdjacentHTML('beforeend', '<footer id="cp-credit">System Developed By: <b>Nomer Sta Ana</b></footer>');
+  document.querySelector('.app .brand small')?.insertAdjacentHTML('afterend', '<small id="cp-dev">System Developed By: <b style="color:var(--ink);font-weight:600">Nomer Sta Ana</b></small>');
 }
 const _renderAll = renderAll;
 renderAll = function (force) {
