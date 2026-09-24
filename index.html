@@ -1,0 +1,1154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Meatplus Check Printer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --bg:#F2F5F3; --surface:#FFFFFF; --surface-2:#E8EEEA; --ink:#16201D; --muted:#56655F; --line:#D0DAD4;
+  --accent:#1E5A4D; --accent-ink:#FFFFFF; --accent-soft:#DCEAE4;
+  --warn:#8E5409; --warn-soft:#F6E9D2; --bad:#A1262B; --bad-soft:#F7DEDD; --good:#256A2C; --good-soft:#DDEEDB;
+  --info:#1D4F86; --info-soft:#DDE8F5;
+  --leaf:#EEF4F0; --leaf-pattern:#BFD6CA; --leaf-ink:#3F6B8A; --print:#0B0B0B; --focus:#2D7FF9;
+  --sans:"IBM Plex Sans", "Segoe UI", system-ui, sans-serif; --mono:"IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#0E1412; --surface:#151D1A; --surface-2:#1C2622; --ink:#E2EBE7; --muted:#95A59E; --line:#2A3632;
+    --accent:#78C2AB; --accent-ink:#0A1814; --accent-soft:#1D3931;
+    --warn:#E3A857; --warn-soft:#382A13; --bad:#F08C86; --bad-soft:#3C1D1C; --good:#90CC90; --good-soft:#1C321F;
+    --info:#8DB7EA; --info-soft:#18283B; --focus:#7FB0FF;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0E1412; --surface:#151D1A; --surface-2:#1C2622; --ink:#E2EBE7; --muted:#95A59E; --line:#2A3632;
+  --accent:#78C2AB; --accent-ink:#0A1814; --accent-soft:#1D3931;
+  --warn:#E3A857; --warn-soft:#382A13; --bad:#F08C86; --bad-soft:#3C1D1C; --good:#90CC90; --good-soft:#1C321F;
+  --info:#8DB7EA; --info-soft:#18283B; --focus:#7FB0FF;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.45;padding-inline:16px;padding-block:0 48px}
+.app{max-width:1320px;margin:0 auto}
+h1,h2,h3{margin:0;text-wrap:balance}
+h2{font-size:17px;font-weight:600}
+h3{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.num,.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+
+/* top bar */
+.topbar{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;padding-block:18px 12px}
+.brand{display:flex;align-items:center;gap:10px;margin-right:auto}
+.brand svg{flex:none}
+.brand h1{font-size:19px;font-weight:700;letter-spacing:-.01em}
+.brand small{display:block;color:var(--muted);font-size:12px;font-weight:400;letter-spacing:0}
+.topbar label{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.topbar select{min-width:220px;max-width:100%}
+.chip{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:3px 10px;font-size:12px;font-weight:500;white-space:nowrap}
+.chip::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.chip.cloud{background:var(--good-soft);color:var(--good)}
+.chip.local{background:var(--warn-soft);color:var(--warn)}
+
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);overflow-x:auto;margin-bottom:18px}
+.tabs button{background:none;border:0;border-bottom:2px solid transparent;padding:10px 14px;cursor:pointer;color:var(--muted);font-weight:500;white-space:nowrap}
+.tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+.tabs button:hover{color:var(--ink)}
+
+/* forms */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px}
+.form{display:flex;flex-direction:column;gap:12px}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:500;color:var(--muted);min-width:0}
+input:not([type=checkbox]):not([type=file]),select,textarea{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:7px 9px;color:var(--ink);font-size:14px;width:100%;min-width:0}
+textarea{resize:vertical}
+input[readonly],textarea[readonly]{background:var(--surface-2)}
+input.big{font-family:var(--mono);font-size:18px;font-weight:500}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.inline{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink);cursor:pointer}
+.inline input{accent-color:var(--accent);width:16px;height:16px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:8px 14px;cursor:pointer;font-weight:500;white-space:nowrap}
+.btn:hover{background:var(--surface-2)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.danger{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,var(--line))}
+.btn.sm{padding:4px 9px;font-size:12px;border-radius:6px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.hint{font-size:12px;color:var(--muted);font-weight:400}
+.muted{color:var(--muted)}
+
+/* write tab */
+.split{display:grid;grid-template-columns:minmax(0,440px) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:980px){.split{grid-template-columns:1fr}}
+.sticky{position:sticky;top:12px;display:flex;flex-direction:column;gap:12px}
+.leaf-wrap{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px}
+.leaf-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+svg.leaf{display:block;width:100%;height:auto;border-radius:4px;box-shadow:0 1px 0 var(--line),0 6px 18px -10px rgba(0,0,0,.35);user-select:none;touch-action:none}
+svg.leaf .pt{font-family:Helvetica,Arial,sans-serif;fill:var(--print)}
+svg.leaf .pp{font-family:var(--sans);fill:var(--leaf-ink)}
+svg.leaf .edit [data-field]{cursor:grab}
+svg.leaf .sel{fill:#0F6B55}
+svg.leaf .anchor{fill:#E0672B}
+.notes{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px;margin:10px 0 0;padding-left:18px}
+.msgs{display:flex;flex-direction:column;gap:6px}
+.msg{border-radius:7px;padding:7px 10px;font-size:13px}
+.msg.bad{background:var(--bad-soft);color:var(--bad)}
+.msg.warn{background:var(--warn-soft);color:var(--warn)}
+.msg.info{background:var(--info-soft);color:var(--info)}
+.msg.good{background:var(--good-soft);color:var(--good)}
+.msg a{color:inherit;font-weight:600;cursor:pointer;text-decoration:underline}
+.issued{border:1px solid color-mix(in srgb,var(--good) 35%,var(--line));background:var(--good-soft);border-radius:10px;padding:12px 14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.issued b{font-family:var(--mono)}
+details summary{cursor:pointer;font-weight:500;font-size:13px}
+.entries{width:100%;border-collapse:collapse;margin-top:8px}
+.entries td{padding:3px 3px 3px 0}
+.entries input{padding:5px 7px!important;font-size:13px!important}
+.entries td:nth-child(2),.entries td:nth-child(3){width:26%}
+.entries td:last-child{width:30px}
+
+/* tables */
+.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table.t{width:100%;border-collapse:collapse;font-size:13px}
+table.t th{text-align:left;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:9px 10px;border-bottom:1px solid var(--line);background:var(--surface-2);white-space:nowrap}
+table.t td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+table.t tr:last-child td{border-bottom:0}
+table.t td.r,table.t th.r{text-align:right}
+table.t tr.void td{color:var(--muted)}
+table.t tr.void td.amt{text-decoration:line-through}
+table.t tr.voidrow td{background:var(--bad-soft)}
+.st{display:inline-block;border-radius:5px;padding:1px 7px;font-size:11px;font-weight:600;letter-spacing:.03em;white-space:nowrap}
+.st-Issued{background:var(--info-soft);color:var(--info)}
+.st-Released{background:var(--accent-soft);color:var(--accent)}
+.st-Cleared{background:var(--good-soft);color:var(--good)}
+.st-Voided{background:var(--bad-soft);color:var(--bad)}
+.st-Stale{background:var(--warn-soft);color:var(--warn)}
+.st-Post-dated{background:var(--surface-2);color:var(--muted)}
+.rowacts{display:flex;gap:4px;flex-wrap:nowrap}
+.filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.tile .k{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+.tile .v{font-family:var(--mono);font-size:19px;font-weight:500;margin-top:2px}
+.tile .s{font-size:12px;color:var(--muted)}
+.section{display:flex;flex-direction:column;gap:12px;margin-top:24px}
+.sec-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.meter{height:6px;border-radius:3px;background:var(--surface-2);overflow:hidden;width:90px;margin-top:4px}
+.meter i{display:block;height:100%;background:var(--accent)}
+.meter.low i{background:var(--warn)}
+
+/* layout editor */
+.fgroup{border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.fgroup.on{border-color:color-mix(in srgb,var(--accent) 60%,var(--line))}
+.fgroup header{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.fgroup header b{font-size:13px}
+.mini{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:8px}
+.mini label.f{font-size:11px}
+.mini input,.mini select{padding:5px 7px!important;font-size:13px!important}
+.dirty{color:var(--warn);font-size:12px;font-weight:600}
+
+#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);display:flex;flex-direction:column;gap:6px;z-index:10;width:min(460px,calc(100% - 32px))}
+#toast div{background:var(--ink);color:var(--bg);padding:10px 14px;border-radius:8px;font-size:13px;box-shadow:0 8px 24px -8px rgba(0,0,0,.4)}
+#toast div.bad{background:var(--bad);color:#fff}
+#toast div.warn{background:var(--warn);color:#fff}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+#cp-gate{padding-block:24px}
+.cp-login{max-width:440px;margin:8vh auto 0}
+#cp-me{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.1/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+</head>
+<body>
+
+
+<div class="app" hidden>
+  <header class="topbar">
+    <div class="brand">
+      <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect x="1" y="7" width="32" height="20" rx="3" fill="var(--accent)"/><path d="M5 20h11M5 23h7" stroke="var(--accent-ink)" stroke-width="1.6" stroke-linecap="round"/><rect x="21" y="11" width="8" height="5" rx="1" fill="none" stroke="var(--accent-ink)" stroke-width="1.4"/><path d="M19 23c2-3 3 1 5-1s2-2 5 0" stroke="var(--accent-ink)" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg>
+      <div><h1>Check Printer</h1><small>Pre-printed PH bank check stock · PDF output at actual size</small></div>
+    </div>
+    <label for="co-sel">Company <select id="co-sel"></select></label>
+    <span id="store-chip" class="chip local">This browser only</span>
+  </header>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="write">Write check</button>
+    <button role="tab" data-tab="register">Register &amp; reports</button>
+    <button role="tab" data-tab="accounts">Bank accounts</button>
+    <button role="tab" data-tab="layouts">Layouts &amp; calibration</button>
+    <button role="tab" data-tab="companies">Companies &amp; audit</button>
+  </nav>
+  <main>
+    <section id="tab-write" data-panel="write" hidden></section>
+    <section id="tab-register" data-panel="register" hidden></section>
+    <section id="tab-accounts" data-panel="accounts" hidden></section>
+    <section id="tab-layouts" data-panel="layouts" hidden></section>
+    <section id="tab-companies" data-panel="companies" hidden></section>
+  </main>
+</div>
+<datalist id="payees"></datalist>
+<div id="toast" aria-live="polite"></div>
+
+<script>
+'use strict';
+/* ---------- helpers ---------- */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const clone = o => JSON.parse(JSON.stringify(o ?? null));
+const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+const peso = n => (Number(n) || 0).toLocaleString('en-PH', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const parseAmt = s => { const n = parseFloat(String(s ?? '').replace(/[^0-9.]/g, '')); return isFinite(n) ? Math.round(n * 100) / 100 : 0; };
+const r1 = v => Math.round(v * 10) / 10;
+const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
+function lsGet(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } }
+function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+function toast(msg, kind = '') {
+  const el = document.createElement('div'); el.textContent = msg; if (kind) el.className = kind;
+  $('#toast').appendChild(el); setTimeout(() => el.remove(), kind === 'bad' ? 6500 : 3800);
+}
+function deepMerge(t, s) { for (const k in s) { if (s[k] && typeof s[k] === 'object' && !Array.isArray(s[k])) { t[k] = deepMerge(t[k] && typeof t[k] === 'object' ? t[k] : {}, s[k]); } else t[k] = s[k]; } return t; }
+function getPath(o, p) { return p.split('.').reduce((a, k) => a?.[k], o); }
+function setPath(o, p, v) { const ks = p.split('.'); let a = o; ks.slice(0, -1).forEach(k => a = a[k] ??= {}); a[ks.at(-1)] = v; }
+
+/* ---------- Philippine banks ---------- */
+const BANKS = [
+  ['BDO','BDO Unibank'],['BPI','Bank of the Philippine Islands'],['MBTC','Metrobank'],['LBP','LANDBANK'],
+  ['PNB','Philippine National Bank'],['SECB','Security Bank'],['CBC','China Bank'],['RCBC','RCBC'],
+  ['UBP','UnionBank'],['EWB','EastWest Bank'],['DBP','Development Bank of the Philippines'],['PSB','PSBank'],
+  ['AUB','Asia United Bank'],['MAY','Maybank Philippines'],['PBCOM','PBCOM'],['BOC','Bank of Commerce'],
+  ['PVB','Philippine Veterans Bank'],['SBA','Sterling Bank of Asia'],['PBB','Philippine Business Bank'],
+  ['CSB','China Bank Savings'],['CTBC','CTBC Bank Philippines'],['OTHER','Other bank']
+];
+const bankName = c => (BANKS.find(b => b[0] === c) || [c, c || 'Bank'])[1];
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+/* ---------- amount in words ---------- */
+const ONES = ['','ONE','TWO','THREE','FOUR','FIVE','SIX','SEVEN','EIGHT','NINE','TEN','ELEVEN','TWELVE','THIRTEEN','FOURTEEN','FIFTEEN','SIXTEEN','SEVENTEEN','EIGHTEEN','NINETEEN'];
+const TENS = ['','','TWENTY','THIRTY','FORTY','FIFTY','SIXTY','SEVENTY','EIGHTY','NINETY'];
+function w999(n) { const out = [], h = Math.floor(n / 100), r = n % 100; if (h) out.push(ONES[h] + ' HUNDRED'); if (r) out.push(r < 20 ? ONES[r] : TENS[Math.floor(r / 10)] + (r % 10 ? '-' + ONES[r % 10] : '')); return out.join(' '); }
+function intWords(n) { if (n === 0) return 'ZERO'; const p = []; for (const [nm, v] of [['BILLION',1e9],['MILLION',1e6],['THOUSAND',1e3]]) { if (n >= v) { p.push(w999(Math.floor(n / v)) + ' ' + nm); n %= v; } } if (n) p.push(w999(n)); return p.join(' '); }
+// o: {style: 'fraction'|'centavos', case: 'upper'|'title', pesoWord: bool, hyphen: bool}
+function amountWords(amt, o = {}) {
+  if (typeof o === 'string') o = {style: o};
+  const cents = Math.round((Number(amt) || 0) * 100); const p = Math.floor(cents / 100), c = cents % 100;
+  if (!cents) return '';
+  const iw = n => o.hyphen === false ? intWords(n).replace(/-/g, ' ') : intWords(n);
+  const parts = [];
+  if (p) parts.push(iw(p) + (o.pesoWord === false ? '' : p === 1 ? ' PESO' : ' PESOS'));
+  if (c) parts.push(o.style === 'centavos' ? iw(c) + (c === 1 ? ' CENTAVO' : ' CENTAVOS') : String(c).padStart(2, '0') + '/100');
+  const s = parts.join(' AND ') + ' ONLY';
+  return o.case === 'title' ? s.toLowerCase().replace(/(^|[\s-])([a-z])/g, (m, a, b) => a + b.toUpperCase()) : s;
+}
+function fmtDate(iso, fmt) {
+  if (!iso) return ''; const [y, m, d] = iso.split('-'); const mn = MONTHS[+m - 1] || '';
+  switch (fmt) {
+    case 'MM/DD/YYYY': return `${m}/${d}/${y}`;
+    case 'MM-DD-YYYY': return `${m}-${d}-${y}`;
+    case 'MMMM DD, YYYY': return `${mn} ${d}, ${y}`;
+    case 'MMM. DD, YYYY': return `${mn.slice(0,3)}. ${d}, ${y}`;
+    case 'DD-MMM-YYYY': return `${d}-${mn.slice(0,3).toUpperCase()}-${y}`;
+    default: return iso;
+  }
+}
+
+/* ---------- layouts ---------- */
+// All positions in millimetres from the top-left corner of the check leaf; y is the text baseline.
+function stdLayout(code) {
+  return {
+    id: 'std-' + code, name: bankName(code) + ' · standard leaf', bank: code, std: true,
+    // Positions measured from Meatplus Check Set 1 (BDO, Chinabank, BPI leaves, PCHC 8" x 3" standard).
+    checkW: 203.2, checkH: 76.2, paper: 'check', placeX: 0, placeY: 0, nudgeX: 0, nudgeY: 0, bold: false,
+    fields: {
+      date:   {show: true, x: 152.6, y: 14.9, size: 12, mode: 'boxes', fmt: 'MMMM DD, YYYY', order: 'MDY', spacing: 4.8, groupGap: 2.4, sep: '-'},
+      payee:  {show: true, x: 30.3, y: 22.8, size: 12, maxW: 106, stars: false, upper: true},
+      amount: {show: true, x: 152.9, y: 22.5, size: 12, stars: false, prefix: ''},
+      words:  {show: true, x: 21.3, y: 30.1, size: 12, maxW: 170, line2: 6, line2X: 8, style: 'centavos', case: 'title', pesoWord: false, hyphen: false, stars: false},
+      memo:   code === 'CBC' ? {show: true, x: 192, y: 40, size: 12, source: 'acct', align: 'right'} : {show: false, x: 12, y: 57, size: 8, source: 'cv', align: 'left'},
+      acPayee:{show: true, x: 92, y: 1.5}
+    }
+  };
+}
+const STD = Object.fromEntries(BANKS.map(b => ['std-' + b[0], stdLayout(b[0])]));
+function allLayouts() { return {...STD, ...S.layouts}; }
+function getLayout(id) { const L = allLayouts()[id]; if (!L) return clone(STD['std-BDO']); const base = stdLayout(L.bank || 'BDO'); const out = deepMerge(clone(base), clone(L)); out.id = id; return out; }
+
+function measureCanvas(t, size, bold) {
+  const ctx = measureCanvas.ctx || (measureCanvas.ctx = document.createElement('canvas').getContext('2d'));
+  ctx.font = (bold ? 'bold ' : '') + '100px Helvetica, Arial, sans-serif';
+  return ctx.measureText(t).width * (size * 0.352778 / 100);
+}
+function wrap(text, size, maxW, measure) {
+  const words = text.split(' '), lines = []; let cur = '';
+  for (const w of words) { const t = cur ? cur + ' ' + w : w; if (!cur || measure(t, size) <= maxW) cur = t; else { lines.push(cur); cur = w; } }
+  if (cur) lines.push(cur); return lines;
+}
+// Produce the printable items for a check, shared by the preview and the PDF so both match.
+function buildItems(L, d, measure) {
+  const F = L.fields, items = [];
+  const add = (field, x, y, size, text, align = 'left') => items.push({field, x, y, size, text, align});
+  if (F.date.show && d.date) {
+    const f = F.date;
+    if (f.mode === 'boxes') {
+      const [y, m, dd] = d.date.split('-');
+      const groups = f.order === 'DMY' ? [dd, m, y] : f.order === 'YMD' ? [y, m, dd] : [m, dd, y];
+      let x = +f.x; groups.forEach((g, gi) => { for (const ch of g) { add('date', x, +f.y, +f.size, ch, 'center'); x += +f.spacing; } if (f.sep && gi < 2) add('date', x - +f.spacing / 2 + +f.groupGap / 2, +f.y, +f.size, f.sep, 'center'); x += +f.groupGap; });
+    } else add('date', +f.x, +f.y, +f.size, fmtDate(d.date, f.fmt));
+  }
+  if (F.payee.show && d.payee) {
+    const f = F.payee; let t = f.upper ? d.payee.toUpperCase() : d.payee; if (f.stars) t = '**' + t + '**';
+    let s = +f.size; while (s > 6 && measure(t, s) > +f.maxW) s -= 0.5; add('payee', +f.x, +f.y, s, t);
+  }
+  if (F.amount.show && d.amount > 0) {
+    const f = F.amount; let t = f.stars ? '**' + peso(d.amount) + '**' : peso(d.amount); if (f.prefix) t = f.prefix + ' ' + t;
+    add('amount', +f.x, +f.y, +f.size, t);
+  }
+  if (F.words.show && d.words) {
+    const f = F.words; const t = f.stars ? '**' + d.words + '**' : d.words;
+    let s = +f.size, lines;
+    const fitLines = sz => { const first = wrap(t, sz, +f.maxW, measure); if (first.length < 2) return first; const rest = first.slice(1).join(' '); const w2 = +f.maxW + (+f.x - +f.line2X); return [first[0], ...wrap(rest, sz, w2, measure)]; };
+    lines = fitLines(s); while (lines.length > 2 && s > 6) { s -= 0.5; lines = fitLines(s); }
+    add('words', +f.x, +f.y, s, lines[0]);
+    if (lines[1]) add('words', +f.line2X, +f.y + +f.line2, s, lines.slice(1).join(' '));
+  }
+  if (F.memo.show) {
+    const f = F.memo; const t = f.source === 'particulars' ? (d.particulars || '').split('\n')[0] : f.source === 'acct' ? (d.acctNo || '') : (d.cvNo ? 'CV# ' + d.cvNo : '');
+    if (t) add('memo', +f.x, +f.y, +f.size, t, f.align || 'left');
+  }
+  if (F.acPayee.show && d.acPayee) items.push({field: 'acPayee', type: 'crossing', x: +F.acPayee.x, y: +F.acPayee.y});
+  return items;
+}
+
+/* ---------- check leaf preview (SVG, millimetre units) ---------- */
+let leafSeq = 0;
+function leafSVG(L, d, opt = {}) {
+  const W = +L.checkW, H = +L.checkH, F = L.fields, k = 0.352778;
+  const items = buildItems(L, d, (t, s) => measureCanvas(t, s, L.bold));
+  const pid = 'gl' + (++leafSeq);
+  let s = `<svg class="leaf" viewBox="0 0 ${W} ${H}" role="img" aria-label="Check preview"><defs><pattern id="${pid}" width="9" height="3.2" patternUnits="userSpaceOnUse"><path d="M0 1.6 Q2.25 0 4.5 1.6 T9 1.6" fill="none" stroke="var(--leaf-pattern)" stroke-width="0.22"/></pattern></defs>`;
+  s += `<rect width="${W}" height="${H}" rx="1.4" fill="var(--leaf)"/><rect width="${W}" height="${H}" rx="1.4" fill="url(#${pid})" opacity=".75"/>`;
+  // pre-printed elements (indicative only; the bank prints these)
+  const pp = (x, y, sz, t, extra = '') => `<text class="pp" x="${x}" y="${y}" font-size="${sz}" ${extra}>${esc(t)}</text>`;
+  const ln = (x1, y1, x2, y2, w = .18) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--leaf-ink)" stroke-width="${w}"/>`;
+  s += `<g opacity=".85">`;
+  s += pp(6, 8, 3.4, bankName(L.bank).toUpperCase(), 'font-weight="700" letter-spacing=".15"');
+  if (d.acctLabel) s += pp(6, 11.4, 2, d.acctLabel);
+  s += pp(W - 6, 8, 3, 'No. ' + (d.noStr || '0000000000'), 'text-anchor="end" font-family="IBM Plex Mono, monospace"');
+  const dateItems = items.filter(i => i.field === 'date');
+  if (F.date.show && F.date.mode === 'boxes') {
+    const sp = +F.date.spacing, order = F.date.order === 'DMY' ? 'DDMMYYYY' : F.date.order === 'YMD' ? 'YYYYMMDD' : 'MMDDYYYY';
+    let x = +F.date.x; const y = +F.date.y; let i = 0;
+    [2, 2, 4].forEach(n => { for (let j = 0; j < n; j++) { s += `<rect x="${x - (sp - .7) / 2}" y="${y - 4.6}" width="${sp - .7}" height="6.2" fill="none" stroke="var(--leaf-ink)" stroke-width=".18"/>` + pp(x, y + 3.6, 1.7, order[i], 'text-anchor="middle"'); x += sp; i++; } x += +F.date.groupGap; });
+    s += pp(+F.date.x - sp / 2 - 1.5, y, 2.4, 'DATE', 'text-anchor="end"');
+  } else if (F.date.show) {
+    s += pp(+F.date.x - 2, +F.date.y, 2.4, 'DATE', 'text-anchor="end"') + ln(+F.date.x, +F.date.y + 1.3, W - 8, +F.date.y + 1.3);
+  }
+  s += pp(6, +F.payee.y - 2.5, 2.1, 'PAY TO THE') + pp(6, +F.payee.y, 2.1, 'ORDER OF');
+  s += ln(+F.payee.x - 2, +F.payee.y + 1.3, +F.amount.x - 8, +F.payee.y + 1.3);
+  s += `<rect x="${+F.amount.x - 2.5}" y="${+F.amount.y - 5}" width="${Math.max(10, W - 5 - (+F.amount.x - 2.5))}" height="7" fill="none" stroke="var(--leaf-ink)" stroke-width=".2" rx=".6"/>`;
+  s += pp(+F.amount.x - 3.8, +F.amount.y, 3.4, '₱', 'text-anchor="end" font-weight="600"');
+  s += pp(6, +F.words.y + 2.2, 2.6, 'PESOS', 'font-weight="600"') + ln(19, +F.words.y + 2.2, W - 10, +F.words.y + 2.2);
+  s += ln(W - 74, H - 17, W - 8, H - 17) + pp(W - 41, H - 14, 1.8, 'AUTHORIZED SIGNATURE(S)', 'text-anchor="middle" letter-spacing=".2"');
+  s += pp(W / 2, H - 5, 3.3, `⑈${d.noStr || '0000000000'}⑈  ⑆${d.brstn || '000000000'}⑆  ${d.acctNo || '000000000000'}⑈`, 'text-anchor="middle" font-family="IBM Plex Mono, monospace" letter-spacing=".5"');
+  s += `</g>`;
+  // printed items
+  s += `<g class="${opt.editable ? 'edit' : ''}">`;
+  for (const it of items) {
+    const sel = opt.selected === it.field ? ' sel' : '';
+    if (it.type === 'crossing') {
+      s += `<g data-field="acPayee" class="${sel}"><rect x="${it.x}" y="${it.y}" width="24" height="18" fill="transparent"/><line x1="${it.x}" y1="${it.y + 17}" x2="${it.x + 17}" y2="${it.y}" stroke="var(--print)" stroke-width=".35"/><line x1="${it.x + 6}" y1="${it.y + 17}" x2="${it.x + 23}" y2="${it.y}" stroke="var(--print)" stroke-width=".35"/><text class="pt${sel}" transform="translate(${it.x + 6.3} ${it.y + 13.9}) rotate(-45)" font-size="${6.5 * k}" font-weight="700">A/C PAYEE ONLY</text></g>`;
+      continue;
+    }
+    s += `<text class="pt${sel}" data-field="${it.field}" x="${it.x}" y="${it.y}" font-size="${(it.size * k).toFixed(3)}" font-weight="${L.bold ? 700 : 400}" ${it.align === 'center' ? 'text-anchor="middle"' : it.align === 'right' ? 'text-anchor="end"' : ''}>${esc(it.text)}</text>`;
+  }
+  if (opt.editable) for (const f of ['date','payee','amount','words','memo','acPayee']) if (F[f].show) s += `<circle class="anchor" data-field="${f}" cx="${F[f].x}" cy="${F[f].y}" r="${opt.selected === f ? 1.1 : .7}"/>`;
+  s += `</g></svg>`;
+  return s;
+}
+
+/* ---------- PDF output ---------- */
+const PAPERS = {check: null, letter: [215.9, 279.4], a4: [210, 297], long: [215.9, 330.2]};
+function newCheckDoc(L) {
+  const {jsPDF} = window.jspdf;
+  if (L.paper === 'check' || !PAPERS[L.paper]) return {doc: new jsPDF({unit: 'mm', format: [+L.checkW, +L.checkH], orientation: +L.checkW > +L.checkH ? 'landscape' : 'portrait'}), ox: +L.nudgeX || 0, oy: +L.nudgeY || 0};
+  return {doc: new jsPDF({unit: 'mm', format: PAPERS[L.paper], orientation: 'portrait'}), ox: (+L.placeX || 0) + (+L.nudgeX || 0), oy: (+L.placeY || 0) + (+L.nudgeY || 0)};
+}
+function drawItems(doc, L, items, ox, oy) {
+  doc.setTextColor(0); doc.setDrawColor(0);
+  for (const it of items) {
+    if (it.type === 'crossing') {
+      const x = ox + it.x, y = oy + it.y; doc.setLineWidth(0.35);
+      doc.line(x, y + 17, x + 17, y); doc.line(x + 6, y + 17, x + 23, y);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(6.5); doc.text('A/C PAYEE ONLY', x + 6.3, y + 13.9, {angle: 45});
+      continue;
+    }
+    doc.setFont('helvetica', L.bold ? 'bold' : 'normal'); doc.setFontSize(it.size);
+    doc.text(it.text, ox + it.x, oy + it.y, it.align === 'center' || it.align === 'right' ? {align: it.align} : undefined);
+  }
+}
+function checkPdf(L, d, test = false) {
+  const {doc, ox, oy} = newCheckDoc(L);
+  const measure = (t, s) => { doc.setFont('helvetica', L.bold ? 'bold' : 'normal'); doc.setFontSize(s); return doc.getTextWidth(t); };
+  const items = buildItems(L, d, measure);
+  if (test) {
+    doc.setDrawColor(120); doc.setLineWidth(0.2); doc.setLineDashPattern([1.2, 1], 0);
+    doc.rect(ox, oy, +L.checkW, +L.checkH); doc.setLineDashPattern([], 0);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(6); doc.setTextColor(90);
+    for (const f of ['date','payee','amount','words','memo','acPayee']) {
+      const F = L.fields[f]; if (!F.show) continue; const x = ox + +F.x, y = oy + +F.y;
+      doc.setDrawColor(200, 60, 30); doc.line(x - 1.5, y, x + 1.5, y); doc.line(x, y - 1.5, x, y + 1.5);
+      doc.text(`${f} (${r1(+F.x)}, ${r1(+F.y)})`, x + 1.2, y + 3.2);
+    }
+    doc.setTextColor(90); doc.text(`ALIGNMENT TEST · ${L.name} · print at 100% (Actual size) and hold against a blank check leaf`, ox + 3, oy + +L.checkH - 2.5);
+  }
+  drawItems(doc, L, items, ox, oy);
+  return doc.output('blob');
+}
+function voucherPdf(rec) {
+  const {jsPDF} = window.jspdf; const doc = new jsPDF({unit: 'mm', format: 'letter'});
+  const co = S.companies[rec.companyId] || {}, acct = S.accounts[rec.accountId] || {};
+  const M = 15, R = 215.9 - M, W = R - M; let y = 18;
+  const T = (t, x, yy, o = {}) => { doc.setFont('helvetica', o.b ? 'bold' : 'normal'); doc.setFontSize(o.s || 9.5); doc.setTextColor(o.c ?? 0); doc.text(String(t ?? ''), x, yy, o.a ? {align: o.a} : undefined); };
+  doc.setDrawColor(0);
+  T(co.name || 'Company', M, y, {b: 1, s: 13}); y += 5;
+  if (co.address) { doc.setFontSize(8.5); const a = doc.splitTextToSize(co.address, 110); T(a, M, y, {s: 8.5}); y += 4 * a.length; }
+  if (co.tin) { T('TIN: ' + co.tin, M, y, {s: 8.5}); y += 4; }
+  T('CHECK VOUCHER', R, 18, {b: 1, s: 15, a: 'right'});
+  T('CV No.  ' + (rec.cvNo || '—'), R, 24.5, {a: 'right', b: 1});
+  T('Date  ' + fmtDate(rec.date, 'MMMM DD, YYYY'), R, 29.5, {a: 'right'});
+  y = Math.max(y, 34) + 1; doc.setLineWidth(0.5); doc.line(M, y, R, y); y += 7;
+  T('PAYEE', M, y, {s: 7.5, c: 90, b: 1}); T('AMOUNT', R, y, {s: 7.5, c: 90, b: 1, a: 'right'}); y += 5.5;
+  T(rec.payee, M, y, {b: 1, s: 12}); T('PHP ' + peso(rec.amount), R, y, {b: 1, s: 12, a: 'right'}); y += 8;
+  // particulars
+  doc.setLineWidth(0.25); const top = y;
+  doc.rect(M, y, W, 7); T('PARTICULARS', M + 2, y + 4.8, {b: 1, s: 8}); T('AMOUNT', R - 2, y + 4.8, {b: 1, s: 8, a: 'right'}); y += 7;
+  doc.setFontSize(9.5); const pl = doc.splitTextToSize(rec.particulars || '—', W - 50);
+  const ph = Math.max(34, pl.length * 4.6 + 8); doc.rect(M, y, W, ph); doc.line(R - 42, top, R - 42, y + ph);
+  T(pl, M + 2, y + 6); T(peso(rec.amount), R - 2, y + 6, {a: 'right'}); y += ph;
+  doc.rect(M, y, W, 7); T('TOTAL', R - 44, y + 4.8, {b: 1, s: 8, a: 'right'}); T(peso(rec.amount), R - 2, y + 4.8, {b: 1, a: 'right'}); y += 12;
+  T('AMOUNT IN WORDS', M, y, {s: 7.5, c: 90, b: 1}); y += 5;
+  doc.setFontSize(9.5); const wl = doc.splitTextToSize(rec.words || '', W); T(wl, M, y, {b: 1}); y += wl.length * 4.6 + 5;
+  // bank row
+  const cols = [['BANK', bankName(acct.bank) + (acct.branch ? ' · ' + acct.branch : '')], ['ACCOUNT NO.', acct.number || ''], ['CHECK NO.', rec.noStr], ['CHECK DATE', fmtDate(rec.date, 'MM/DD/YYYY')]];
+  const cw = [W * .4, W * .22, W * .2, W * .18]; let x = M;
+  doc.rect(M, y, W, 13); cols.forEach((c, i) => { if (i) doc.line(x, y, x, y + 13); T(c[0], x + 2, y + 4.5, {s: 7, c: 90, b: 1}); doc.setFontSize(9); T(doc.splitTextToSize(c[1], cw[i] - 4)[0], x + 2, y + 10); x += cw[i]; }); y += 19;
+  // entries
+  const ent = (rec.entries || []).filter(e => e.acct || e.dr || e.cr);
+  if (ent.length) {
+    T('ACCOUNTING ENTRIES', M, y, {s: 7.5, c: 90, b: 1}); y += 3;
+    doc.rect(M, y, W, 7); doc.line(R - 60, y, R - 60, y + 7 + ent.length * 6.5 + 7); doc.line(R - 30, y, R - 30, y + 7 + ent.length * 6.5 + 7);
+    T('ACCOUNT TITLE', M + 2, y + 4.8, {b: 1, s: 8}); T('DEBIT', R - 32, y + 4.8, {b: 1, s: 8, a: 'right'}); T('CREDIT', R - 2, y + 4.8, {b: 1, s: 8, a: 'right'}); y += 7;
+    let td = 0, tc = 0;
+    for (const e of ent) { doc.rect(M, y, W, 6.5); T(e.acct, M + 2, y + 4.5); if (+e.dr) T(peso(e.dr), R - 32, y + 4.5, {a: 'right'}); if (+e.cr) T(peso(e.cr), R - 2, y + 4.5, {a: 'right'}); td += +e.dr || 0; tc += +e.cr || 0; y += 6.5; }
+    doc.rect(M, y, W, 7); T('TOTAL', R - 62, y + 4.8, {b: 1, s: 8, a: 'right'}); T(peso(td), R - 32, y + 4.8, {b: 1, a: 'right'}); T(peso(tc), R - 2, y + 4.8, {b: 1, a: 'right'}); y += 13;
+  }
+  // signatories
+  y = Math.max(y + 6, 200);
+  const sig = [['Prepared by', co.prepared], ['Checked by', co.checked], ['Approved by', co.approved]]; const sw = W / 3;
+  sig.forEach((g, i) => { const sx = M + i * sw; T(g[0], sx, y, {s: 8, c: 90}); doc.line(sx, y + 12, sx + sw - 8, y + 12); T(g[1] || '', sx, y + 16, {s: 9, b: 1}); });
+  y += 26; doc.setLineWidth(0.25); doc.rect(M, y, W, 34);
+  doc.setFontSize(8.5); const rcv = doc.splitTextToSize(`RECEIVED from ${co.name || 'the company'} the sum of ${rec.words || ''} (PHP ${peso(rec.amount)}) in payment of the above.`, W - 6);
+  T(rcv, M + 3, y + 6, {s: 8.5});
+  doc.line(M + 3, y + 26, M + 95, y + 26); T('Signature over printed name', M + 3, y + 30, {s: 7.5, c: 90});
+  doc.line(R - 60, y + 26, R - 3, y + 26); T('Date received', R - 60, y + 30, {s: 7.5, c: 90});
+  T(`Check ${rec.noStr} · ${bankName(acct.bank)} ${acct.number || ''}`, M, 272, {s: 7, c: 120});
+  return doc.output('blob');
+}
+
+/* ---------- storage: shared db when available, this browser otherwise ---------- */
+const COLS = ['companies', 'accounts', 'layouts', 'checks', 'audit'];
+let S = {companies: {}, accounts: {}, layouts: {}, checks: {}, audit: {}};
+let DB = null, DL = null, USER = null;
+const LSKEY = 'mtc-check-printer-data';
+const queues = {};
+function enqueue(path, fn) { const p = (queues[path] || Promise.resolve()).catch(() => {}).then(fn); queues[path] = p; return p; }
+function saveLocal() { if (!DB) lsSet(LSKEY, S); }
+async function put(col, id, data) {
+  S[col] = {...S[col], [id]: data}; scheduleRender();
+  if (DB) return enqueue(col + '/' + id, () => DB.doc(col + '/' + id).set(data)); saveLocal();
+}
+async function patch(col, id, partial) {
+  const cur = S[col][id]; const merged = deepMerge(clone(cur || {}), clone(partial));
+  S[col] = {...S[col], [id]: merged}; scheduleRender();
+  if (DB) return enqueue(col + '/' + id, () => cur ? DB.doc(col + '/' + id).update(partial) : DB.doc(col + '/' + id).set(merged));
+  saveLocal();
+}
+async function remove(col, id) {
+  const n = {...S[col]}; delete n[id]; S[col] = n; scheduleRender();
+  if (DB) return enqueue(col + '/' + id, () => DB.doc(col + '/' + id).delete()); saveLocal();
+}
+function writeErr(e) { console.error(e); const c = e && e.code; toast(c === 'quota_exceeded' ? 'Storage is full. Export the register to Excel and archive old records.' : c === 'invalid_argument' ? 'You have view-only access, so this change was not saved.' : 'Could not save: ' + (e?.message || c || e), 'bad'); }
+async function audit(action, detail) {
+  const now = new Date(); const ym = now.toISOString().slice(0, 7).replace('-', '');
+  const key = now.getTime().toString(36) + Math.random().toString(36).slice(2, 5);
+  try { await patch('audit', ym, {entries: {[key]: {t: now.toISOString(), by: ME.id || '', byName: ME.name || '', action, detail}}}); } catch (e) { console.error(e); }
+}
+const ME = {id: null, name: ''};
+
+/* ---------- derived data ---------- */
+const BUCKET = 200;
+const bucketId = (acctId, no) => acctId + '~' + Math.floor(no / BUCKET);
+function padNo(acct, no) { return String(no).padStart(acct?.digits || 10, '0'); }
+let _checksCache = null, _checksSrc = null;
+function allChecks() {
+  if (_checksSrc === S.checks) return _checksCache;
+  const out = [];
+  for (const [bid, b] of Object.entries(S.checks)) for (const [no, r] of Object.entries(b.checks || {})) {
+    const acct = S.accounts[b.accountId]; out.push({...r, no: +no, accountId: b.accountId, bucket: bid, noStr: padNo(acct, +no)});
+  }
+  _checksSrc = S.checks; _checksCache = out; return out;
+}
+function findCheck(acctId, no) { return S.checks[bucketId(acctId, no)]?.checks?.[no]; }
+function effStatus(r) {
+  if (r.status === 'Voided' || r.status === 'Cleared') return r.status;
+  const t = todayISO();
+  if (r.date > t) return 'Post-dated';
+  if (daysBetween(r.date, t) > 180) return 'Stale';
+  return r.status || 'Issued';
+}
+const companyList = () => Object.entries(S.companies).map(([id, c]) => ({id, ...c})).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+const accountList = (coId = app.company) => Object.entries(S.accounts).map(([id, a]) => ({id, ...a})).filter(a => coId === 'ALL' || a.companyId === coId).sort((a, b) => (a.companyId + bankName(a.bank)).localeCompare(b.companyId + bankName(b.bank)));
+const acctLabel = a => a ? `${bankName(a.bank)} · ${a.number || 'no acct no.'}${a.branch ? ' · ' + a.branch : ''}` : '';
+const coName = id => S.companies[id]?.short || S.companies[id]?.name || '—';
+function nextCv(co) { return `${co?.cvPrefix || 'CV'}-${new Date().getFullYear()}-${String(co?.cvNext || 1).padStart(4, '0')}`; }
+
+/* ---------- downloads ---------- */
+async function saveFile(filename, data) {
+  if (!DL && !window.claude) { // opened as a standalone file in a normal browser
+    const url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data])); const a = document.createElement('a');
+    a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000); return true;
+  }
+  if (!DL) { toast('File downloads are not available in this view. Open the page on claude.ai to download PDFs.', 'bad'); return false; }
+  try { await DL.save({filename, data}); return true; }
+  catch (e) {
+    if (e?.code === 'declined') toast('Download cancelled.');
+    else if (e?.code === 'rate_limited') toast('Another download prompt is still open. Finish that one first.', 'warn');
+    else toast('Download failed: ' + (e?.message || e?.code || e), 'bad');
+    return false;
+  }
+}
+
+/* ---------- app state ---------- */
+const app = {
+  company: lsGet('mtc-co', 'ALL'), tab: 'write',
+  draft: null, last: null, voidOpen: null, spoiledOpen: false,
+  reg: {account: 'ALL', status: 'ALL', from: '', to: '', q: ''},
+  layoutId: null, layoutDraft: null, layoutDirty: false, layoutSel: 'payee',
+  acctEdit: null, coEdit: null, importData: null
+};
+function newDraft(keepAcct) {
+  return {accountId: keepAcct || '', no: '', noAuto: true, date: todayISO(), payee: '', amount: '', words: '', wordsManual: false,
+    particulars: '', cvNo: '', cvAuto: true, acPayee: false, entries: [{acct: '', dr: '', cr: ''}, {acct: '', dr: '', cr: ''}], alsoVoucher: true};
+}
+app.draft = newDraft();
+
+let rq = false;
+function scheduleRender() { if (rq) return; rq = true; requestAnimationFrame(() => { rq = false; renderAll(); }); }
+
+/* ---------- top bar & tabs ---------- */
+function renderTop() {
+  const sel = $('#co-sel'); const cos = companyList();
+  if (app.company !== 'ALL' && !S.companies[app.company] && cos.length) app.company = 'ALL';
+  sel.innerHTML = `<option value="ALL">All companies</option>` + cos.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  sel.value = app.company;
+  const chip = $('#store-chip');
+  chip.className = 'chip ' + (DB ? 'cloud' : 'local'); chip.textContent = DB ? 'Shared database' : 'This browser only';
+  chip.title = DB ? 'Records are saved to this page\'s shared database and seen by everyone with access.' : 'Records are kept in this browser only. Use Companies › Backup to export them.';
+  $$('.tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === app.tab)));
+  $$('[data-panel]').forEach(p => p.hidden = p.dataset.panel !== app.tab);
+}
+$('#co-sel').addEventListener('change', e => { app.company = e.target.value; lsSet('mtc-co', app.company); app.draft.accountId = ''; app.acctEdit = null; app.coEdit = null; renderAll(true); });
+$$('.tabs button').forEach(b => b.addEventListener('click', () => { app.tab = b.dataset.tab; try { history.replaceState(null, '', '#' + app.tab); } catch {} renderAll(true); }));
+function go(tab) { app.tab = tab; renderAll(true); window.scrollTo({top: 0}); }
+
+const mounted = {};
+function renderAll(force) {
+  renderTop();
+  const t = app.tab;
+  if (t === 'write') renderWrite(force);
+  if (t === 'register') renderRegister();
+  if (t === 'accounts') renderAccounts(!!force);
+  if (t === 'layouts') renderLayouts(force);
+  if (t === 'companies') renderCompanies(!!force);
+  $('#payees').innerHTML = [...new Set(allChecks().map(c => c.payee).filter(Boolean))].sort().slice(0, 400).map(p => `<option value="${esc(p)}">`).join('');
+}
+
+/* ---------- WRITE CHECK ---------- */
+function writeData(d, acct) {
+  const amount = parseAmt(d.amount);
+  return {date: d.date, payee: d.payee.trim(), amount, words: d.words, particulars: d.particulars, cvNo: d.cvNo, acPayee: d.acPayee,
+    noStr: acct ? padNo(acct, +d.no || 0) : '', acctNo: acct?.number || '', brstn: (acct?.brstn || '').replace(/\D/g, ''), acctLabel: acct ? (acct.name || '') + (acct.branch ? ' · ' + acct.branch + ' Branch' : '') : ''};
+}
+function syncDraftAuto() {
+  const d = app.draft; const accts = accountList();
+  if (!d.accountId || !accts.find(a => a.id === d.accountId)) { d.accountId = accts.find(a => a.active !== false)?.id || accts[0]?.id || ''; d.noAuto = true; }
+  const acct = S.accounts[d.accountId] ? {id: d.accountId, ...S.accounts[d.accountId]} : null;
+  if (acct && d.noAuto) d.no = String(acct.nextNo || acct.seriesFrom || 1);
+  const co = acct ? S.companies[acct.companyId] : null;
+  if (d.cvAuto) d.cvNo = co ? nextCv(co) : '';
+  const L = acct ? getLayout(acct.layoutId || 'std-' + acct.bank) : null;
+  if (!d.wordsManual) d.words = amountWords(parseAmt(d.amount), L?.fields.words || stdLayout('BDO').fields.words);
+  return {acct, co, L};
+}
+function renderWrite(force) {
+  const el = $('#tab-write');
+  if (!mounted.write || force) {
+    mounted.write = true;
+    el.innerHTML = `<div class="split">
+      <form id="wf" class="card form" autocomplete="off" novalidate>
+        <div class="sec-head"><h2>New check</h2><span class="hint" id="w-series"></span></div>
+        <label class="f">Bank account<select id="w-acct"></select></label>
+        <div class="row">
+          <label class="f">Check no.<input id="w-no" class="mono" inputmode="numeric"></label>
+          <label class="f">Check date<input id="w-date" type="date"></label>
+        </div>
+        <label class="f">Payee<input id="w-payee" list="payees" placeholder="Name exactly as it should appear on the check"></label>
+        <label class="f">Amount (PHP)<input id="w-amt" class="big" inputmode="decimal" placeholder="0.00"></label>
+        <div class="f" style="display:flex;flex-direction:column;gap:4px">
+          <div class="sec-head"><span class="hint" style="font-weight:500">Amount in words</span><label class="inline hint"><input type="checkbox" id="w-wm"> Edit manually</label></div>
+          <textarea id="w-words" rows="3" readonly></textarea>
+        </div>
+        <div class="row">
+          <label class="f">CV no.<input id="w-cv" class="mono"></label>
+          <label class="inline" style="align-self:end;padding-bottom:8px"><input type="checkbox" id="w-ac"> Cross: A/C PAYEE ONLY</label>
+        </div>
+        <label class="f">Particulars (voucher)<textarea id="w-part" rows="3" placeholder="e.g. Payment for Invoice #1234, delivery of frozen pork cuts"></textarea></label>
+        <details id="w-ent"><summary>Accounting entries on the voucher</summary>
+          <table class="entries"><tbody id="w-ent-body"></tbody></table>
+          <div class="actions" style="margin-top:6px"><button type="button" class="btn sm" id="w-ent-add">Add line</button><span class="hint" id="w-ent-tot"></span></div>
+        </details>
+        <div class="msgs" id="w-msgs"></div>
+        <label class="inline"><input type="checkbox" id="w-alsov"> Also download the check voucher</label>
+        <div class="actions">
+          <button type="submit" class="btn primary" id="w-issue">Issue check &amp; download PDF</button>
+          <button type="button" class="btn" id="w-test">Alignment test</button>
+          <button type="button" class="btn" id="w-clear">Clear</button>
+        </div>
+      </form>
+      <div class="sticky">
+        <div id="w-last"></div>
+        <div class="leaf-wrap">
+          <div class="leaf-head"><h3>Preview on check leaf</h3><span class="hint" id="w-layname"></span></div>
+          <div id="w-leaf"></div>
+          <ul class="notes">
+            <li>The PDF is sized to the check. Print it at <b>100% / Actual size</b>, never "Fit to page".</li>
+            <li>Feed the blank leaf face-up the way your printer's manual feed expects, then check alignment with a test print on plain paper first.</li>
+            <li>Only the variable data prints. Bank name, boxes and MICR line shown here are guides.</li>
+          </ul>
+        </div>
+      </div></div>`;
+    const d = () => app.draft;
+    const bind = (id, key, after) => $(id).addEventListener('input', e => { d()[key] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; after && after(e); updateWrite(); });
+    $('#w-acct').addEventListener('change', e => { d().accountId = e.target.value; d().noAuto = true; updateWrite(true); });
+    bind('#w-no', 'no', () => d().noAuto = false);
+    bind('#w-date', 'date'); bind('#w-payee', 'payee'); bind('#w-amt', 'amount');
+    $('#w-amt').addEventListener('blur', e => { const v = parseAmt(e.target.value); if (v) { e.target.value = peso(v); d().amount = e.target.value; } });
+    bind('#w-words', 'words'); bind('#w-cv', 'cvNo', () => d().cvAuto = false); bind('#w-ac', 'acPayee'); bind('#w-part', 'particulars'); bind('#w-alsov', 'alsoVoucher');
+    $('#w-wm').addEventListener('change', e => { d().wordsManual = e.target.checked; $('#w-words').readOnly = !e.target.checked; updateWrite(); });
+    $('#w-ent-add').addEventListener('click', () => { d().entries.push({acct: '', dr: '', cr: ''}); renderEntries(); });
+    $('#w-ent-body').addEventListener('input', e => { const i = +e.target.dataset.i, k = e.target.dataset.k; if (k) { d().entries[i][k] = e.target.value; entTotals(); } });
+    $('#w-ent-body').addEventListener('click', e => { const b = e.target.closest('[data-del]'); if (b) { d().entries.splice(+b.dataset.del, 1); renderEntries(); } });
+    $('#w-clear').addEventListener('click', () => { app.draft = newDraft(app.draft.accountId); renderWrite(true); });
+    $('#w-test').addEventListener('click', async () => { const {acct, L} = syncDraftAuto(); const lay = L || getLayout('std-BDO'); const data = writeData(app.draft, acct); if (!data.amount) Object.assign(data, sampleData(lay), {acctNo: data.acctNo || '001234567890'}); await saveFile(`Alignment-test-${lay.bank}.pdf`, checkPdf(lay, data, true)); });
+    $('#wf').addEventListener('submit', e => { e.preventDefault(); issueCheck(); });
+    fillWriteInputs();
+  }
+  updateWrite(true);
+}
+function fillWriteInputs() {
+  const d = app.draft;
+  $('#w-no').value = d.no; $('#w-date').value = d.date; $('#w-payee').value = d.payee; $('#w-amt').value = d.amount;
+  $('#w-words').value = d.words; $('#w-wm').checked = d.wordsManual; $('#w-words').readOnly = !d.wordsManual;
+  $('#w-cv').value = d.cvNo; $('#w-ac').checked = d.acPayee; $('#w-part').value = d.particulars; $('#w-alsov').checked = d.alsoVoucher;
+  renderEntries();
+}
+function renderEntries() {
+  $('#w-ent-body').innerHTML = app.draft.entries.map((e, i) => `<tr><td><input data-i="${i}" data-k="acct" value="${esc(e.acct)}" placeholder="Account title" aria-label="Account title"></td><td><input data-i="${i}" data-k="dr" class="mono" value="${esc(e.dr)}" placeholder="Debit" inputmode="decimal" aria-label="Debit"></td><td><input data-i="${i}" data-k="cr" class="mono" value="${esc(e.cr)}" placeholder="Credit" inputmode="decimal" aria-label="Credit"></td><td><button type="button" class="btn sm" data-del="${i}" aria-label="Remove line">×</button></td></tr>`).join('');
+  entTotals();
+}
+function entTotals() {
+  const e = app.draft.entries; const dr = e.reduce((s, x) => s + parseAmt(x.dr), 0), cr = e.reduce((s, x) => s + parseAmt(x.cr), 0);
+  $('#w-ent-tot').textContent = dr || cr ? `Debit ${peso(dr)} · Credit ${peso(cr)}${Math.abs(dr - cr) > .004 ? ' · not balanced' : ' · balanced'}` : '';
+}
+function updateWrite(refreshSelect) {
+  const d = app.draft; const {acct, co, L} = syncDraftAuto();
+  if (refreshSelect) {
+    const accts = accountList();
+    const groups = {}; accts.forEach(a => (groups[a.companyId] ??= []).push(a));
+    $('#w-acct').innerHTML = accts.length ? Object.entries(groups).map(([cid, list]) => `<optgroup label="${esc(coName(cid))}">${list.map(a => `<option value="${a.id}">${esc(acctLabel(a))}${a.active === false ? ' (inactive)' : ''}</option>`).join('')}</optgroup>`).join('') : `<option value="">No bank accounts yet</option>`;
+    $('#w-acct').value = d.accountId;
+  }
+  if (d.noAuto && document.activeElement !== $('#w-no')) $('#w-no').value = d.no;
+  if (d.cvAuto && document.activeElement !== $('#w-cv')) $('#w-cv').value = d.cvNo;
+  if (!d.wordsManual) $('#w-words').value = d.words;
+  $('#w-series').textContent = acct ? `Series ${padNo(acct, acct.seriesFrom)}–${padNo(acct, acct.seriesTo)}` : '';
+  const lay = L || getLayout('std-BDO');
+  $('#w-layname').textContent = lay.name;
+  const data = writeData(d, acct);
+  const show = data.amount || data.payee ? data : {...sampleData(lay), noStr: data.noStr || '0000123456', acctLabel: data.acctLabel, acctNo: data.acctNo || '001234567890', brstn: data.brstn};
+  $('#w-leaf').innerHTML = leafSVG(lay, show);
+  if (!(data.amount || data.payee)) $('#w-layname').textContent = lay.name + ' · sample data shown';
+  // messages
+  const m = []; const no = parseInt(d.no, 10);
+  if (!companyList().length) m.push(['bad', 'Add your company first. <a data-go="companies">Open Companies</a>']);
+  else if (!acct) m.push(['bad', 'Add a bank account and its checkbook series. <a data-go="accounts">Open Bank accounts</a>']);
+  if (acct) {
+    if (!no) m.push(['bad', 'Enter the check number printed on the leaf.']);
+    else {
+      const ex = findCheck(acct.id, no);
+      if (ex) m.push(['bad', `Check ${padNo(acct, no)} is already in the register (${effStatus(ex)}, ${esc(ex.payee || 'spoiled')}). Use Register › PDF to reprint it.`]);
+      if (acct.seriesFrom && acct.seriesTo && (no < +acct.seriesFrom || no > +acct.seriesTo)) m.push(['warn', `Check no. is outside this checkbook's series.`]);
+      const left = +acct.seriesTo - Math.max(no, +acct.nextNo || 0) + 1;
+      if (acct.seriesTo && left > 0 && left <= 10) m.push(['warn', `${left} leaf${left > 1 ? 'ves' : ''} left in this checkbook. Order a new one soon.`]);
+    }
+    if (acct.active === false) m.push(['warn', 'This account is marked inactive.']);
+  }
+  const t = todayISO();
+  if (d.date > t) m.push(['info', `Post-dated check: can be encashed on ${fmtDate(d.date, 'MMMM DD, YYYY')}.`]);
+  if (d.date && daysBetween(d.date, t) > 180) m.push(['bad', 'This date is more than 6 months ago. Banks treat the check as stale.']);
+  const e = d.entries; const dr = e.reduce((s, x) => s + parseAmt(x.dr), 0), cr = e.reduce((s, x) => s + parseAmt(x.cr), 0);
+  if ((dr || cr) && Math.abs(dr - cr) > .004) m.push(['warn', 'Accounting entries are not balanced.']);
+  if (data.amount >= 1e12) m.push(['bad', 'Amount is too large.']);
+  $('#w-msgs').innerHTML = m.map(([k, h]) => `<div class="msg ${k}">${h}</div>`).join('');
+  const blocking = m.some(x => x[0] === 'bad');
+  $('#w-issue').disabled = blocking || !data.amount || !data.payee || !d.date;
+  // last issued
+  const L2 = app.last && S.accounts[app.last.accountId] && findCheck(app.last.accountId, app.last.no);
+  $('#w-last').innerHTML = L2 ? `<div class="issued"><div>Issued check <b>${padNo(S.accounts[app.last.accountId], app.last.no)}</b> · ${esc(L2.payee)} · ₱${peso(L2.amount)}</div><div class="actions"><button class="btn sm" data-reprint="${app.last.accountId}|${app.last.no}">Check PDF</button><button class="btn sm" data-voucher="${app.last.accountId}|${app.last.no}">Voucher PDF</button></div></div>` : '';
+}
+function sampleData(L) { return {date: todayISO(), payee: 'Juan dela Cruz Trading', amount: 125430.5, words: amountWords(125430.5, L?.fields?.words || stdLayout('BDO').fields.words), cvNo: 'CV-' + new Date().getFullYear() + '-0001', acPayee: true, particulars: 'Sample particulars', noStr: '0000123456', acctNo: '001234567890', acctLabel: 'Sample account'}; }
+
+async function issueCheck() {
+  const d = app.draft; const {acct, co, L} = syncDraftAuto(); if (!acct) return;
+  const no = parseInt(d.no, 10); const data = writeData(d, acct);
+  if (!no || !data.amount || !data.payee) return;
+  if (findCheck(acct.id, no)) { toast('That check number is already used.', 'bad'); return; }
+  const rec = {date: d.date, payee: data.payee, amount: data.amount, words: d.words, particulars: d.particulars.trim(), cvNo: d.cvNo.trim(),
+    acPayee: !!d.acPayee, entries: d.entries.filter(x => x.acct || x.dr || x.cr).map(x => ({acct: x.acct, dr: parseAmt(x.dr), cr: parseAmt(x.cr)})),
+    status: 'Issued', companyId: acct.companyId, createdAt: new Date().toISOString(), createdBy: ME.id || '', createdByName: ME.name || '', printed: 1};
+  const btn = $('#w-issue'); btn.disabled = true;
+  try {
+    const b = bucketId(acct.id, no);
+    await patch('checks', b, {accountId: acct.id, checks: {[no]: rec}});
+    if (no >= (+acct.nextNo || 0)) await patch('accounts', acct.id, {nextNo: no + 1});
+    if (d.cvAuto && co) await patch('companies', acct.companyId, {cvNext: (+co.cvNext || 1) + 1});
+    audit('Issued', `${bankName(acct.bank)} ${acct.number || ''} #${padNo(acct, no)} · ${rec.payee} · ₱${peso(rec.amount)}`);
+  } catch (e) { writeErr(e); btn.disabled = false; return; }
+  app.last = {accountId: acct.id, no};
+  const alsoV = d.alsoVoucher;
+  app.draft = newDraft(acct.id); app.draft.alsoVoucher = alsoV; app.draft.date = d.date;
+  fillWriteInputs(); updateWrite(true);
+  toast(`Check ${padNo(acct, no)} saved to the register.`);
+  const full = {...rec, no, accountId: acct.id, noStr: padNo(acct, no)};
+  await saveFile(`Check-${acct.bank}-${padNo(acct, no)}.pdf`, checkPdf(L, {...full, acctNo: acct.number}));
+  if (alsoV) await saveFile(`Voucher-${rec.cvNo || padNo(acct, no)}.pdf`, voucherPdf(full));
+}
+async function reprint(acctId, no, voucher) {
+  const acct = S.accounts[acctId]; const r = findCheck(acctId, no); if (!acct || !r) return;
+  const full = {...r, no, accountId: acctId, noStr: padNo(acct, no)};
+  if (voucher) { await saveFile(`Voucher-${r.cvNo || full.noStr}.pdf`, voucherPdf(full)); return; }
+  if (r.status === 'Voided') { toast('This check is voided and cannot be reprinted.', 'warn'); return; }
+  const L = getLayout(acct.layoutId || 'std-' + acct.bank);
+  const ok = await saveFile(`Check-${acct.bank}-${full.noStr}-reprint.pdf`, checkPdf(L, {...full, acctNo: acct.number}));
+  if (ok) { try { await patch('checks', bucketId(acctId, no), {checks: {[no]: {printed: (r.printed || 1) + 1}}}); audit('Reprinted', `${bankName(acct.bank)} #${full.noStr} · ${r.payee}`); } catch (e) { writeErr(e); } }
+}
+document.addEventListener('click', e => {
+  const g = e.target.closest('[data-go]'); if (g) { e.preventDefault(); go(g.dataset.go); return; }
+  const rp = e.target.closest('[data-reprint]'); if (rp) { const [a, n] = rp.dataset.reprint.split('|'); reprint(a, +n, false); return; }
+  const vc = e.target.closest('[data-voucher]'); if (vc) { const [a, n] = vc.dataset.voucher.split('|'); reprint(a, +n, true); }
+});
+
+/* ---------- REGISTER & REPORTS ---------- */
+function regRows() {
+  const f = app.reg; const q = f.q.trim().toLowerCase();
+  return allChecks().filter(r => (app.company === 'ALL' || r.companyId === app.company) && (f.account === 'ALL' || r.accountId === f.account)
+    && (f.status === 'ALL' || effStatus(r) === f.status || (f.status === 'Outstanding' && ['Issued','Released','Post-dated','Stale'].includes(effStatus(r))))
+    && (!f.from || r.date >= f.from) && (!f.to || r.date <= f.to)
+    && (!q || [r.payee, r.noStr, r.cvNo, r.particulars].some(v => String(v || '').toLowerCase().includes(q))))
+    .sort((a, b) => b.date.localeCompare(a.date) || b.no - a.no);
+}
+function renderRegister() {
+  const el = $('#tab-register');
+  if (!mounted.register) {
+    mounted.register = true;
+    el.innerHTML = `<div class="filters">
+        <label class="f">Account<select id="r-acct"></select></label>
+        <label class="f">Status<select id="r-st">${['ALL','Outstanding','Issued','Released','Post-dated','Stale','Cleared','Voided'].map(s => `<option value="${s}">${s === 'ALL' ? 'All statuses' : s}</option>`).join('')}</select></label>
+        <label class="f">From<input type="date" id="r-from"></label>
+        <label class="f">To<input type="date" id="r-to"></label>
+        <label class="f">Search<input id="r-q" placeholder="Payee, check no., CV no."></label>
+      </div>
+      <div class="tiles" id="r-tiles"></div>
+      <div class="sec-head" style="margin-bottom:10px"><h2>Check register</h2><div class="actions"><button class="btn" id="r-spoil">Record spoiled leaf</button><button class="btn primary" id="r-xlsx">Export to Excel</button></div></div>
+      <div id="r-spoilbox"></div>
+      <div class="table-wrap"><table class="t"><thead><tr><th>Check no.</th><th>Date</th><th>Payee</th><th class="r">Amount</th><th>Account</th><th>CV no.</th><th>Status</th><th></th></tr></thead><tbody id="r-body"></tbody></table></div>
+      <div class="section"><div class="sec-head"><h2>Summary by bank account</h2><span class="hint">Uses the company, date and search filters above</span></div>
+      <div class="table-wrap"><table class="t"><thead><tr><th>Account</th><th>Company</th><th>Leaves left</th><th class="r">Checks</th><th class="r">Outstanding</th><th class="r">Cleared</th><th class="r">Voided</th></tr></thead><tbody id="r-sum"></tbody></table></div></div>`;
+    const f = app.reg;
+    $('#r-acct').addEventListener('change', e => { f.account = e.target.value; renderRegister(); });
+    $('#r-st').addEventListener('change', e => { f.status = e.target.value; renderRegister(); });
+    $('#r-from').addEventListener('change', e => { f.from = e.target.value; renderRegister(); });
+    $('#r-to').addEventListener('change', e => { f.to = e.target.value; renderRegister(); });
+    $('#r-q').addEventListener('input', e => { f.q = e.target.value; renderRegister(); });
+    $('#r-xlsx').addEventListener('click', exportXlsx);
+    $('#r-spoil').addEventListener('click', () => { app.spoiledOpen = !app.spoiledOpen; renderRegister(); });
+    $('#r-body').addEventListener('click', regAction);
+    $('#r-spoilbox').addEventListener('submit', spoilSubmit);
+    $('#r-spoilbox').addEventListener('click', e => { if (e.target.id === 'sp-cancel') { app.spoiledOpen = false; renderRegister(); } });
+  }
+  const f = app.reg; const accts = accountList();
+  if (f.account !== 'ALL' && !accts.find(a => a.id === f.account)) f.account = 'ALL';
+  $('#r-acct').innerHTML = `<option value="ALL">All accounts</option>` + accts.map(a => `<option value="${a.id}">${esc(acctLabel(a))}</option>`).join('');
+  $('#r-acct').value = f.account; $('#r-st').value = f.status;
+  const rows = regRows();
+  // tiles
+  const agg = st => rows.filter(r => st.includes(effStatus(r)));
+  const tile = (k, list, note) => `<div class="tile"><div class="k">${k}</div><div class="v">₱${peso(list.reduce((s, r) => s + (r.amount || 0), 0))}</div><div class="s">${list.length} check${list.length === 1 ? '' : 's'}${note ? ' · ' + note : ''}</div></div>`;
+  const out = agg(['Issued','Released','Post-dated','Stale']);
+  $('#r-tiles').innerHTML = tile('Outstanding', out, 'not yet cleared') + tile('Released to payee', agg(['Released'])) + tile('Cleared', agg(['Cleared'])) + tile('Stale (over 6 months)', agg(['Stale'])) + `<div class="tile"><div class="k">Voided / spoiled</div><div class="v">${agg(['Voided']).length}</div><div class="s">leaves</div></div>`;
+  // spoiled leaf form
+  if (app._spoilShown !== app.spoiledOpen || !app.spoiledOpen) { app._spoilShown = app.spoiledOpen;
+  $('#r-spoilbox').innerHTML = app.spoiledOpen ? `<form class="card form" style="margin-bottom:12px"><h2>Record a spoiled or cancelled leaf</h2><p class="hint" style="margin:0">Use this for a leaf that was damaged or misprinted before it was issued, so the number is accounted for.</p><div class="row"><label class="f">Account<select id="sp-acct" required>${accts.map(a => `<option value="${a.id}">${esc(acctLabel(a))}</option>`).join('')}</select></label><label class="f">Check no.<input id="sp-no" class="mono" inputmode="numeric" required></label><label class="f">Reason<input id="sp-reason" required placeholder="e.g. Misaligned print, torn leaf"></label></div><div class="actions"><button class="btn primary">Save as voided</button><button type="button" class="btn" id="sp-cancel">Cancel</button></div></form>` : '';
+  if (app.spoiledOpen && accts.length) { const a = S.accounts[$('#sp-acct').value]; if (a) $('#sp-no').value = a.nextNo || ''; $('#sp-acct').addEventListener('change', e => { $('#sp-no').value = S.accounts[e.target.value]?.nextNo || ''; }); } }
+  // rows
+  const body = rows.slice(0, 500).map(r => {
+    const st = effStatus(r), a = S.accounts[r.accountId], key = r.accountId + '|' + r.no;
+    const acts = st === 'Cleared' ? `<button class="btn sm" data-reprint="${key}">PDF</button><button class="btn sm" data-voucher="${key}">Voucher</button>` : st === 'Voided' ? `<button class="btn sm" data-voucher="${key}">Voucher</button>` :
+      `<button class="btn sm" data-reprint="${key}">PDF</button><button class="btn sm" data-voucher="${key}">Voucher</button>` +
+      (r.status === 'Issued' ? `<button class="btn sm" data-act="Released" data-k="${key}">Released</button>` : '') +
+      (r.status !== 'Cleared' ? `<button class="btn sm" data-act="Cleared" data-k="${key}">Cleared</button>` : '') +
+      `<button class="btn sm danger" data-act="void" data-k="${key}">Void</button>`;
+    let h = `<tr class="${st === 'Voided' ? 'void' : ''}"><td class="mono">${r.noStr}</td><td class="mono">${r.date}</td><td>${esc(r.payee || '—')}${r.voidReason ? `<div class="hint">Void: ${esc(r.voidReason)}</div>` : ''}${r.acPayee ? `<div class="hint">A/C payee only</div>` : ''}</td><td class="r mono amt">${peso(r.amount)}</td><td>${esc(a ? bankName(a.bank) : '—')}<div class="hint mono">${esc(a?.number || '')}</div></td><td class="mono">${esc(r.cvNo || '')}</td><td><span class="st st-${st}">${st}</span>${r.printed > 1 ? `<div class="hint">printed ${r.printed}×</div>` : ''}</td><td><div class="rowacts">${acts}</div></td></tr>`;
+    if (app.voidOpen === key) h += `<tr class="voidrow"><td colspan="8"><form class="actions" data-voidform="${key}"><b>Void check ${r.noStr}?</b><input id="void-reason" placeholder="Reason (required)" style="max-width:320px" required><button class="btn sm danger">Confirm void</button><button type="button" class="btn sm" data-act="cancelvoid">Keep check</button></form></td></tr>`;
+    return h;
+  }).join('');
+  $('#r-body').innerHTML = body || `<tr><td colspan="8" class="empty">${allChecks().length ? 'No checks match these filters.' : 'No checks yet. Issue one from <a data-go="write" style="cursor:pointer;text-decoration:underline">Write check</a>.'}</td></tr>`;
+  if (rows.length > 500) $('#r-body').insertAdjacentHTML('beforeend', `<tr><td colspan="8" class="hint">Showing the latest 500 of ${rows.length}. Narrow the filters or export to Excel for all.</td></tr>`);
+  const vf = $('[data-voidform]'); if (vf) { vf.addEventListener('submit', voidSubmit); $('#void-reason').focus(); }
+  // summary
+  $('#r-sum').innerHTML = accts.map(a => {
+    const rs = rows.filter(r => r.accountId === a.id); const left = Math.max(0, (+a.seriesTo || 0) - (+a.nextNo || 0) + 1); const tot = (+a.seriesTo - +a.seriesFrom + 1) || 1;
+    const sum = l => peso(l.reduce((s, r) => s + (r.amount || 0), 0));
+    return `<tr><td>${esc(acctLabel(a))}</td><td>${esc(coName(a.companyId))}</td><td><span class="mono">${left}</span><div class="meter ${left <= 10 ? 'low' : ''}"><i style="width:${Math.min(100, left / tot * 100)}%"></i></div></td><td class="r mono">${rs.length}</td><td class="r mono">${sum(rs.filter(r => !['Cleared','Voided'].includes(effStatus(r))))}</td><td class="r mono">${sum(rs.filter(r => r.status === 'Cleared'))}</td><td class="r mono">${rs.filter(r => r.status === 'Voided').length}</td></tr>`;
+  }).join('') || `<tr><td colspan="7" class="empty">No bank accounts yet.</td></tr>`;
+}
+async function regAction(e) {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const act = b.dataset.act;
+  if (act === 'cancelvoid') { app.voidOpen = null; renderRegister(); return; }
+  const [acctId, n] = b.dataset.k.split('|'); const no = +n; const r = findCheck(acctId, no); const a = S.accounts[acctId];
+  if (act === 'void') { app.voidOpen = b.dataset.k; renderRegister(); return; }
+  const stamp = new Date().toISOString();
+  try {
+    await patch('checks', bucketId(acctId, no), {checks: {[no]: act === 'Released' ? {status: 'Released', releasedAt: stamp} : {status: 'Cleared', clearedAt: stamp}}});
+    audit('Marked ' + act.toLowerCase(), `${bankName(a?.bank)} #${padNo(a, no)} · ${r?.payee}`);
+  } catch (err) { writeErr(err); }
+}
+async function voidSubmit(e) {
+  e.preventDefault(); const [acctId, n] = e.target.dataset.voidform.split('|'); const no = +n; const reason = $('#void-reason').value.trim();
+  if (!reason) { $('#void-reason').focus(); return; }
+  const a = S.accounts[acctId], r = findCheck(acctId, no);
+  try { await patch('checks', bucketId(acctId, no), {checks: {[no]: {status: 'Voided', voidReason: reason, voidedAt: new Date().toISOString()}}}); audit('Voided', `${bankName(a?.bank)} #${padNo(a, no)} · ${r?.payee} · ${reason}`); toast(`Check ${padNo(a, no)} voided.`); }
+  catch (err) { writeErr(err); }
+  app.voidOpen = null; renderRegister();
+}
+async function spoilSubmit(e) {
+  e.preventDefault(); const acctId = $('#sp-acct').value, no = parseInt($('#sp-no').value, 10), reason = $('#sp-reason').value.trim(); const a = S.accounts[acctId];
+  if (!a || !no || !reason) { toast('Choose the account, check number and a reason.', 'warn'); return; }
+  if (findCheck(acctId, no)) { toast('That check number is already in the register. Void it from the table instead.', 'warn'); return; }
+  const rec = {date: todayISO(), payee: '', amount: 0, words: '', particulars: '', cvNo: '', status: 'Voided', voidReason: 'Spoiled leaf: ' + reason, voidedAt: new Date().toISOString(), companyId: a.companyId, createdAt: new Date().toISOString(), createdBy: ME.id || '', printed: 0};
+  try {
+    await patch('checks', bucketId(acctId, no), {accountId: acctId, checks: {[no]: rec}});
+    if (no >= (+a.nextNo || 0)) await patch('accounts', acctId, {nextNo: no + 1});
+    audit('Spoiled leaf', `${bankName(a.bank)} #${padNo(a, no)} · ${reason}`); toast(`Leaf ${padNo(a, no)} recorded as voided.`);
+    app.spoiledOpen = false; renderRegister();
+  } catch (err) { writeErr(err); }
+}
+async function exportXlsx() {
+  if (!window.XLSX) { toast('The Excel library did not load. Check your connection and reload.', 'bad'); return; }
+  const rows = regRows();
+  if (!rows.length) { toast('Nothing to export with these filters.', 'warn'); return; }
+  const data = rows.map(r => { const a = S.accounts[r.accountId] || {}; return {'Check No.': r.noStr, 'Check Date': r.date, 'Payee': r.payee, 'Amount': r.amount, 'Status': effStatus(r), 'Company': S.companies[r.companyId]?.name || '', 'Bank': bankName(a.bank), 'Account No.': a.number || '', 'CV No.': r.cvNo || '', 'Particulars': r.particulars || '', 'Amount in Words': r.words || '', 'A/C Payee': r.acPayee ? 'Yes' : '', 'Void Reason': r.voidReason || '', 'Issued At': (r.createdAt || '').slice(0, 16).replace('T', ' '), 'Released At': (r.releasedAt || '').slice(0, 10), 'Cleared At': (r.clearedAt || '').slice(0, 10), 'Times Printed': r.printed || 0}; });
+  const ws = XLSX.utils.json_to_sheet(data);
+  ws['!cols'] = [14, 12, 34, 14, 11, 30, 26, 16, 16, 40, 60, 9, 30, 17, 12, 12, 8].map(w => ({wch: w}));
+  const rng = XLSX.utils.decode_range(ws['!ref']); for (let R = 1; R <= rng.e.r; R++) { const c = ws[XLSX.utils.encode_cell({r: R, c: 3})]; if (c) c.z = '#,##0.00'; }
+  const sum = accountList().map(a => { const rs = rows.filter(r => r.accountId === a.id); const s = l => Math.round(l.reduce((x, r) => x + (r.amount || 0), 0) * 100) / 100; return {'Company': S.companies[a.companyId]?.name || '', 'Bank': bankName(a.bank), 'Account No.': a.number || '', 'Checks': rs.length, 'Outstanding': s(rs.filter(r => !['Cleared','Voided'].includes(effStatus(r)))), 'Cleared': s(rs.filter(r => r.status === 'Cleared')), 'Voided': rs.filter(r => r.status === 'Voided').length}; });
+  const ws2 = XLSX.utils.json_to_sheet(sum); ws2['!cols'] = [30, 26, 16, 8, 14, 14, 8].map(w => ({wch: w}));
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Check Register'); XLSX.utils.book_append_sheet(wb, ws2, 'Summary');
+  const buf = XLSX.write(wb, {bookType: 'xlsx', type: 'array'});
+  const coPart = app.company === 'ALL' ? 'All' : (S.companies[app.company]?.short || 'Company').replace(/[^\w-]+/g, '');
+  if (await saveFile(`Check-Register-${coPart}-${todayISO()}.xlsx`, new Blob([buf]))) audit('Exported register', `${rows.length} rows`);
+}
+
+/* ---------- BANK ACCOUNTS ---------- */
+function renderAccounts(force = true) {
+  if (!force && app.acctEdit && $('#a-form')) return;
+  const el = $('#tab-accounts'); const cos = companyList(); const accts = accountList();
+  const ed = app.acctEdit;
+  const layOpts = sel => { const all = allLayouts(); const mine = Object.keys(S.layouts); return `<optgroup label="Your calibrated layouts">${mine.map(id => `<option value="${id}" ${id === sel ? 'selected' : ''}>${esc(all[id].name)}</option>`).join('')}</optgroup><optgroup label="Standard templates">${Object.keys(STD).filter(id => !S.layouts[id]).map(id => `<option value="${id}" ${id === sel ? 'selected' : ''}>${esc(STD[id].name)}</option>`).join('')}</optgroup>`; };
+  el.innerHTML = `<div class="split">
+    <div>${ed ? `<form class="card form" id="a-form">
+      <h2>${ed.id ? 'Edit bank account' : 'Add bank account'}</h2>
+      <label class="f">Company<select id="a-co" required>${cos.map(c => `<option value="${c.id}" ${c.id === ed.companyId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+      <div class="row"><label class="f">Bank<select id="a-bank">${BANKS.map(b => `<option value="${b[0]}" ${b[0] === ed.bank ? 'selected' : ''}>${esc(b[1])}</option>`).join('')}</select></label>
+      <label class="f">Branch<input id="a-branch" value="${esc(ed.branch)}" placeholder="e.g. Magalang"></label></div>
+      <label class="f">Account name<input id="a-name" value="${esc(ed.name)}" placeholder="As printed on the check"></label>
+      <div class="row"><label class="f">Account number<input id="a-number" class="mono" value="${esc(ed.number)}"></label><label class="f">BRSTN<input id="a-brstn" class="mono" value="${esc(ed.brstn || '')}" placeholder="From the check, top right"></label></div>
+      <div class="row"><label class="f">Series from<input id="a-from" class="mono" inputmode="numeric" value="${esc(ed.seriesFromStr ?? ed.seriesFrom)}" placeholder="0000100001"></label>
+      <label class="f">Series to<input id="a-to" class="mono" inputmode="numeric" value="${esc(ed.seriesToStr ?? ed.seriesTo)}"></label>
+      <label class="f">Next check no.<input id="a-next" class="mono" inputmode="numeric" value="${esc(ed.nextNo)}"></label></div>
+      <label class="f">Print layout<select id="a-layout">${layOpts(ed.layoutId || 'std-' + ed.bank)}</select></label>
+      <label class="inline"><input type="checkbox" id="a-active" ${ed.active !== false ? 'checked' : ''}> Active</label>
+      <p class="hint" style="margin:0">Enter the series with leading zeros exactly as printed (e.g. 0000100001). The number of digits is used when printing and in the register. When you receive a new checkbook, update the series and next check no.</p>
+      <div class="actions"><button class="btn primary">Save account</button><button type="button" class="btn" id="a-cancel">Cancel</button>${ed.id ? `<button type="button" class="btn danger" id="a-del">Delete</button>` : ''}</div>
+      <div id="a-delbox"></div>
+    </form>` : `<div class="card form"><h2>Bank accounts</h2><p class="muted" style="margin:0">Each account holds its checkbook series, the next check number and the print layout calibrated for that bank's leaf.</p>
+      ${cos.length ? `<div class="actions"><button class="btn primary" id="a-new">Add bank account</button></div>` : `<div class="msg warn">Add a company first. <a data-go="companies">Open Companies</a></div>`}</div>`}
+    </div>
+    <div class="table-wrap"><table class="t"><thead><tr><th>Bank / account</th><th>Company</th><th>Series</th><th>Next no.</th><th>Layout</th><th></th></tr></thead><tbody>
+    ${accts.map(a => `<tr><td><b>${esc(bankName(a.bank))}</b>${a.active === false ? ' <span class="st st-Post-dated">inactive</span>' : ''}<div class="hint mono">${esc(a.number || '')}${a.branch ? ' · ' + esc(a.branch) : ''}</div><div class="hint">${esc(a.name || '')}</div></td><td>${esc(coName(a.companyId))}</td><td class="mono">${padNo(a, a.seriesFrom)}<br>${padNo(a, a.seriesTo)}</td><td class="mono">${padNo(a, a.nextNo)}</td><td>${esc(allLayouts()[a.layoutId]?.name || 'Standard')}</td><td><button class="btn sm" data-aedit="${a.id}">Edit</button></td></tr>`).join('') || `<tr><td colspan="6" class="empty">No bank accounts${app.company !== 'ALL' ? ' for this company' : ''} yet.</td></tr>`}
+    </tbody></table></div></div>`;
+  $('#a-new')?.addEventListener('click', () => { app.acctEdit = {companyId: app.company !== 'ALL' ? app.company : cos[0]?.id, bank: 'BDO', branch: '', name: S.companies[app.company]?.name || '', number: '', seriesFrom: '', seriesTo: '', nextNo: '', active: true}; renderAccounts(); });
+  $$('[data-aedit]').forEach(b => b.addEventListener('click', () => { const a = S.accounts[b.dataset.aedit]; app.acctEdit = {...clone(a), id: b.dataset.aedit, seriesFromStr: padNo(a, a.seriesFrom), seriesToStr: padNo(a, a.seriesTo)}; renderAccounts(); window.scrollTo({top: 0}); }));
+  $('#a-cancel')?.addEventListener('click', () => { app.acctEdit = null; renderAccounts(); });
+  $('#a-bank')?.addEventListener('change', e => { const sel = $('#a-layout'); if (sel.value.startsWith('std-')) sel.value = S.layouts['std-' + e.target.value] || STD['std-' + e.target.value] ? 'std-' + e.target.value : sel.value; });
+  $('#a-del')?.addEventListener('click', () => {
+    const used = allChecks().some(c => c.accountId === ed.id);
+    $('#a-delbox').innerHTML = used ? `<div class="msg warn">This account has checks in the register, so it can't be deleted. Mark it inactive instead.</div>` : `<div class="msg bad">Delete this account? <a id="a-delok">Yes, delete</a></div>`;
+    $('#a-delok')?.addEventListener('click', async () => { try { await remove('accounts', ed.id); audit('Deleted account', acctLabel(ed)); app.acctEdit = null; renderAccounts(); } catch (e) { writeErr(e); } });
+  });
+  $('#a-form')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const fromS = $('#a-from').value.trim(), toS = $('#a-to').value.trim();
+    const from = parseInt(fromS, 10), to = parseInt(toS, 10); let next = parseInt($('#a-next').value, 10) || from;
+    if (!from || !to || to < from) { toast('Enter a valid checkbook series (from ≤ to).', 'warn'); return; }
+    const data = {companyId: $('#a-co').value, bank: $('#a-bank').value, branch: $('#a-branch').value.trim(), name: $('#a-name').value.trim(), number: $('#a-number').value.trim(), brstn: $('#a-brstn').value.trim(),
+      seriesFrom: from, seriesTo: to, nextNo: next, digits: Math.max(fromS.length, toS.length, 1), layoutId: $('#a-layout').value, active: $('#a-active').checked};
+    const id = ed.id || 'a' + uid();
+    try { await put('accounts', id, data); audit(ed.id ? 'Updated account' : 'Added account', acctLabel(data)); toast('Bank account saved.'); app.acctEdit = null; renderAccounts(); } catch (err) { writeErr(err); }
+  });
+}
+
+/* ---------- LAYOUTS & CALIBRATION ---------- */
+const FIELD_UI = {
+  date: ['Date', [['mode', 'Style', 'sel', [['boxes', 'Digit boxes'], ['text', 'Written']]], ['order', 'Box order', 'sel', [['MDY', 'MM DD YYYY'], ['DMY', 'DD MM YYYY'], ['YMD', 'YYYY MM DD']]], ['spacing', 'Box pitch mm', 'num'], ['groupGap', 'Group gap mm', 'num'], ['sep', 'Separator', 'sel', [['', 'None'], ['-', 'Dash  09-21-2026'], ['/', 'Slash  09/21/2026']]], ['fmt', 'Written format', 'sel', ['MMMM DD, YYYY', 'MMM. DD, YYYY', 'MM/DD/YYYY', 'MM-DD-YYYY', 'DD-MMM-YYYY'].map(v => [v, v])]]],
+  payee: ['Payee', [['maxW', 'Max width mm', 'num'], ['stars', '** marks', 'chk'], ['upper', 'UPPERCASE', 'chk']]],
+  amount: ['Amount in figures', [['prefix', 'Prefix', 'sel', [['', 'None'], ['PHP', 'PHP'], ['P', 'P']]], ['stars', '** marks', 'chk']]],
+  words: ['Amount in words', [['style', 'Centavos', 'sel', [['centavos', 'And Ninety Two Centavos'], ['fraction', 'And 92/100']]], ['case', 'Letter case', 'sel', [['title', 'Title Case'], ['upper', 'UPPERCASE']]], ['pesoWord', 'Say "Pesos"', 'chk'], ['hyphen', 'Hyphen (Ninety-Two)', 'chk'], ['maxW', 'Line 1 width mm', 'num'], ['line2', 'Line 2 drop mm', 'num'], ['line2X', 'Line 2 x mm', 'num'], ['stars', '** marks', 'chk']]],
+  memo: ['Extra line', [['source', 'Prints', 'sel', [['acct', 'Account number'], ['cv', 'CV number'], ['particulars', 'First line of particulars']]], ['align', 'Align', 'sel', [['left', 'Left edge at X'], ['right', 'Right edge at X']]]]],
+  acPayee: ['A/C payee crossing', []]
+};
+function renderLayouts(force) {
+  const el = $('#tab-layouts'); const all = allLayouts();
+  if (!app.layoutId || !all[app.layoutId]) { const a = accountList()[0]; app.layoutId = a ? (a.layoutId || 'std-' + a.bank) : 'std-BDO'; app.layoutDraft = null; }
+  if (!app.layoutDraft) { app.layoutDraft = getLayout(app.layoutId); app.layoutDirty = false; }
+  if (mounted.layouts && !force) { refreshLayoutPreview(); return; }
+  mounted.layouts = true;
+  const L = app.layoutDraft; const mine = Object.keys(S.layouts);
+  const users = accountList('ALL').filter(a => (a.layoutId || 'std-' + a.bank) === app.layoutId);
+  const inp = (path, label, type, opts) => {
+    const v = getPath(L, path);
+    if (type === 'chk') return `<label class="inline"><input type="checkbox" data-p="${path}" ${v ? 'checked' : ''}> ${label}</label>`;
+    if (type === 'sel') return `<label class="f">${label}<select data-p="${path}">${opts.map(([k, t]) => `<option value="${esc(k)}" ${String(v) === k ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>`;
+    return `<label class="f">${label}<input type="number" step="0.1" data-p="${path}" data-num="1" value="${esc(v)}"></label>`;
+  };
+  el.innerHTML = `<div class="split" style="grid-template-columns:minmax(0,460px) minmax(0,1fr)">
+    <div class="form">
+      <div class="card form">
+        <div class="sec-head"><h2>Layout</h2><span class="dirty" id="l-dirty">${app.layoutDirty ? 'Unsaved changes' : ''}</span></div>
+        <label class="f">Editing<select id="l-pick"><optgroup label="Your calibrated layouts">${mine.map(id => `<option value="${id}">${esc(all[id].name)}</option>`).join('')}</optgroup><optgroup label="Standard templates">${Object.keys(STD).filter(id => !S.layouts[id]).map(id => `<option value="${id}">${esc(STD[id].name)}</option>`).join('')}</optgroup></select></label>
+        <label class="f">Layout name<input data-p="name" value="${esc(L.name)}"></label>
+        <p class="hint" style="margin:0">${users.length ? 'Used by: ' + users.map(a => esc(acctLabel(a))).join('; ') : 'No bank account uses this layout yet. Pick it in Bank accounts.'}</p>
+        <div class="mini">
+          ${inp('checkW', 'Leaf width mm', 'num')}${inp('checkH', 'Leaf height mm', 'num')}
+          ${inp('paper', 'PDF page', 'sel', [['check', 'Check size'], ['letter', 'Letter 8.5×11'], ['a4', 'A4'], ['long', 'Long 8.5×13']])}
+          ${L.paper !== 'check' ? inp('placeX', 'Leaf left mm', 'num') + inp('placeY', 'Leaf top mm', 'num') : ''}
+          ${inp('nudgeX', 'Printer shift X', 'num')}${inp('nudgeY', 'Printer shift Y', 'num')}
+        </div>
+        ${inp('bold', 'Bold print', 'chk')}
+        <p class="hint" style="margin:0">Printer shift moves everything at once. Positive X moves right, positive Y moves down. Measure the error on a test print with a ruler and enter it here.</p>
+      </div>
+      ${Object.entries(FIELD_UI).map(([f, [label, extra]]) => `<div class="fgroup ${app.layoutSel === f ? 'on' : ''}" data-fg="${f}"><header><b>${label}</b>${inp(`fields.${f}.show`, 'Print', 'chk')}</header>
+        <div class="mini">${inp(`fields.${f}.x`, 'X mm', 'num')}${inp(`fields.${f}.y`, 'Y mm', 'num')}${f !== 'acPayee' ? inp(`fields.${f}.size`, 'Size pt', 'num') : ''}${extra.filter(e => e[2] !== 'chk').map(e => inp(`fields.${f}.${e[0]}`, e[1], e[2], e[3])).join('')}</div>
+        ${extra.some(e => e[2] === 'chk') ? `<div class="actions">${extra.filter(e => e[2] === 'chk').map(e => inp(`fields.${f}.${e[0]}`, e[1], 'chk')).join('')}</div>` : ''}</div>`).join('')}
+    </div>
+    <div class="sticky">
+      <div class="leaf-wrap">
+        <div class="leaf-head"><h3>Drag fields onto the leaf</h3><span class="hint mono" id="l-pos"></span></div>
+        <div id="l-leaf"></div>
+        <ul class="notes"><li>X and Y are millimetres from the top-left corner of the leaf to the start of the text baseline (the centre of the first digit for date boxes).</li><li>Measure a blank leaf from your checkbook with a ruler, set the positions, then download an alignment test, print it on plain paper at 100% and hold it against the leaf in front of a light.</li><li>The standard templates are a starting point based on the common 8" × 3" PCHC leaf. Calibrate each bank before printing live checks.</li></ul>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="l-save">Save layout</button>
+        <button class="btn" id="l-copy">Save as new layout</button>
+        <button class="btn" id="l-test">Alignment test PDF</button>
+        <button class="btn" id="l-sample">Sample check PDF</button>
+        ${S.layouts[app.layoutId] ? `<button class="btn danger" id="l-reset">${app.layoutId.startsWith('std-') ? 'Reset to template' : 'Delete layout'}</button>` : ''}
+      </div>
+      <div id="l-msg"></div>
+    </div></div>`;
+  $('#l-pick').value = app.layoutId;
+  $('#l-pick').addEventListener('change', e => { app.layoutId = e.target.value; app.layoutDraft = null; renderLayouts(true); });
+  if (!el._bound) { el._bound = true; el.addEventListener('input', layoutInput); el.addEventListener('change', layoutInput); }
+  $('#l-save').addEventListener('click', () => saveLayout(false));
+  $('#l-copy').addEventListener('click', () => saveLayout(true));
+  $('#l-test').addEventListener('click', () => saveFile(`Alignment-test-${L.bank}.pdf`, checkPdf(app.layoutDraft, sampleData(app.layoutDraft), true)));
+  $('#l-sample').addEventListener('click', () => saveFile(`Sample-check-${L.bank}.pdf`, checkPdf(app.layoutDraft, sampleData(app.layoutDraft), false)));
+  $('#l-reset')?.addEventListener('click', () => {
+    const isStd = app.layoutId.startsWith('std-');
+    if (!isStd && users.length) { $('#l-msg').innerHTML = `<div class="msg warn">This layout is used by a bank account. Choose another layout for that account first.</div>`; return; }
+    $('#l-msg').innerHTML = `<div class="msg bad">${isStd ? 'Discard your calibration and go back to the standard template?' : 'Delete this layout?'} <a id="l-resok">Yes</a></div>`;
+    $('#l-resok').addEventListener('click', async () => { try { await remove('layouts', app.layoutId); audit(isStd ? 'Reset layout' : 'Deleted layout', L.name); if (!isStd) app.layoutId = null; app.layoutDraft = null; renderLayouts(true); } catch (e) { writeErr(e); } });
+  });
+  refreshLayoutPreview();
+  bindDrag();
+}
+function layoutInput(e) {
+  const t = e.target; const p = t.dataset?.p; if (!p) return;
+  if (e.type === 'input' && (t.type === 'checkbox' || t.tagName === 'SELECT')) return;
+  let v = t.type === 'checkbox' ? t.checked : t.value; if (t.dataset.num) { v = parseFloat(v); if (!isFinite(v)) return; }
+  setPath(app.layoutDraft, p, v); app.layoutDirty = true; $('#l-dirty').textContent = 'Unsaved changes';
+  const fg = t.closest('[data-fg]'); if (fg) selectField(fg.dataset.fg);
+  if (p === 'paper') { renderLayouts(true); return; }
+  refreshLayoutPreview();
+}
+function selectField(f) { if (app.layoutSel === f) return; app.layoutSel = f; $$('[data-fg]').forEach(g => g.classList.toggle('on', g.dataset.fg === f)); }
+function refreshLayoutPreview() {
+  const L = app.layoutDraft; if (!$('#l-leaf')) return;
+  $('#l-leaf').innerHTML = leafSVG(L, sampleData(L), {editable: true, selected: app.layoutSel});
+  const F = L.fields[app.layoutSel]; $('#l-pos').textContent = F ? `${app.layoutSel}  x ${r1(+F.x)}  y ${r1(+F.y)} mm` : '';
+}
+let drag = null;
+window.addEventListener('pointermove', e => {
+  if (!drag) return; const F = app.layoutDraft.fields[drag.f];
+  F.x = r1(drag.x + (e.clientX - drag.sx) * drag.k); F.y = r1(drag.y + (e.clientY - drag.sy) * drag.k);
+  app.layoutDirty = true; refreshLayoutPreview();
+});
+window.addEventListener('pointerup', () => {
+  if (!drag) return; const f = drag.f; drag = null;
+  const set = (p, v) => { const i = $(`[data-p="${p}"]`); if (i) i.value = v; };
+  set(`fields.${f}.x`, app.layoutDraft.fields[f].x); set(`fields.${f}.y`, app.layoutDraft.fields[f].y);
+  if ($('#l-dirty')) $('#l-dirty').textContent = app.layoutDirty ? 'Unsaved changes' : '';
+  $(`[data-fg="${f}"]`)?.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+});
+function bindDrag() {
+  const box = $('#l-leaf');
+  box.addEventListener('pointerdown', e => {
+    const t = e.target.closest('[data-field]'); if (!t) return; e.preventDefault();
+    const f = t.dataset.field; const F = app.layoutDraft.fields[f];
+    selectField(f); const rect = box.querySelector('svg').getBoundingClientRect();
+    drag = {f, sx: e.clientX, sy: e.clientY, x: +F.x, y: +F.y, k: +app.layoutDraft.checkW / rect.width};
+    refreshLayoutPreview();
+  });
+  box.addEventListener('keydown', e => {
+    const F = app.layoutDraft.fields[app.layoutSel]; if (!F) return;
+    const step = e.shiftKey ? 1 : 0.1; const m = {ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step]}[e.key];
+    if (!m) return; e.preventDefault(); F.x = r1(+F.x + m[0]); F.y = r1(+F.y + m[1]); app.layoutDirty = true; refreshLayoutPreview();
+    const i1 = $(`[data-p="fields.${app.layoutSel}.x"]`), i2 = $(`[data-p="fields.${app.layoutSel}.y"]`); if (i1) i1.value = F.x; if (i2) i2.value = F.y;
+  });
+  box.tabIndex = 0; box.setAttribute('aria-label', 'Check leaf. Drag a field, or select one and use arrow keys (Shift for 1 mm steps).');
+}
+async function saveLayout(asCopy) {
+  const L = clone(app.layoutDraft);
+  const id = asCopy ? 'lay' + uid() : app.layoutId;
+  if (asCopy) L.name = (L.name || 'Layout') + ' (copy)';
+  delete L.id; L.std = false;
+  try { await put('layouts', id, L); audit(asCopy ? 'Created layout' : 'Saved layout', L.name); toast('Layout saved.'); app.layoutId = id; app.layoutDraft = null; renderLayouts(true); }
+  catch (e) { writeErr(e); }
+}
+
+/* ---------- COMPANIES, BACKUP & AUDIT ---------- */
+let profileNames = {};
+function renderCompanies(force = true) {
+  if (!force && (app.coEdit && $('#c-form') || app.importData)) return;
+  const el = $('#tab-companies'); const cos = companyList(); const ed = app.coEdit;
+  const entries = Object.values(S.audit).flatMap(m => Object.values(m.entries || {})).sort((a, b) => b.t.localeCompare(a.t)).slice(0, 150);
+  el.innerHTML = `<div class="split">
+    <div class="form">
+    ${ed ? `<form class="card form" id="c-form"><h2>${ed.id ? 'Edit company' : 'Add company'}</h2>
+      <label class="f">Registered name<input id="c-name" required value="${esc(ed.name)}"></label>
+      <div class="row"><label class="f">Short name<input id="c-short" value="${esc(ed.short)}" placeholder="e.g. MTC"></label><label class="f">TIN<input id="c-tin" class="mono" value="${esc(ed.tin)}" placeholder="000-000-000-000"></label></div>
+      <label class="f">Address<textarea id="c-addr" rows="2">${esc(ed.address)}</textarea></label>
+      <div class="row"><label class="f">CV prefix<input id="c-cvp" value="${esc(ed.cvPrefix || 'CV')}"></label><label class="f">Next CV no.<input id="c-cvn" class="mono" inputmode="numeric" value="${esc(ed.cvNext || 1)}"></label></div>
+      <h3>Voucher signatories</h3>
+      <div class="row"><label class="f">Prepared by<input id="c-prep" value="${esc(ed.prepared)}"></label><label class="f">Checked by<input id="c-chk" value="${esc(ed.checked)}"></label><label class="f">Approved by<input id="c-appr" value="${esc(ed.approved)}"></label></div>
+      <div class="actions"><button class="btn primary">Save company</button><button type="button" class="btn" id="c-cancel">Cancel</button></div></form>`
+    : `<div class="card form"><div class="sec-head"><h2>Companies</h2><button class="btn primary sm" id="c-new">Add company</button></div>
+      <div class="table-wrap" style="border:0"><table class="t"><thead><tr><th>Company</th><th>Next CV</th><th></th></tr></thead><tbody>
+      ${cos.map(c => `<tr><td><b>${esc(c.name)}</b><div class="hint">${esc(c.short || '')}${c.tin ? ' · TIN ' + esc(c.tin) : ''}</div></td><td class="mono">${esc(nextCv(c))}</td><td><button class="btn sm" data-cedit="${c.id}">Edit</button></td></tr>`).join('') || `<tr><td colspan="3" class="empty">No companies yet.</td></tr>`}
+      </tbody></table></div></div>`}
+      <div class="card form"><h2>Backup</h2>
+        <p class="muted" style="margin:0">${DB ? 'Records are stored in this page\'s shared database. Download a backup regularly for your files.' : 'Records are stored in this browser only. Download a backup often, and before clearing browser data.'}</p>
+        <div class="actions"><button class="btn" id="b-exp">Download backup (.json)</button><label class="btn" for="b-imp">Restore from backup…</label><input type="file" id="b-imp" accept=".json,application/json" hidden></div>
+        <div id="b-msg"></div>
+      </div>
+    </div>
+    <div><div class="sec-head" style="margin-bottom:10px"><h2>Audit log</h2><span class="hint">Latest ${entries.length} actions</span></div>
+      <div class="table-wrap"><table class="t"><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Details</th></tr></thead><tbody>
+      ${entries.map(a => `<tr><td class="mono" style="white-space:nowrap">${esc(a.t.slice(0, 16).replace('T', ' '))}</td><td>${esc(profileNames[a.by] || a.byName || (a.by ? 'Member' : '—'))}</td><td>${esc(a.action)}</td><td>${esc(a.detail)}</td></tr>`).join('') || `<tr><td colspan="4" class="empty">Nothing logged yet.</td></tr>`}
+      </tbody></table></div></div></div>`;
+  $('#c-new')?.addEventListener('click', () => { app.coEdit = {name: '', short: '', tin: '', address: '', cvPrefix: 'CV', cvNext: 1}; renderCompanies(); });
+  $$('[data-cedit]').forEach(b => b.addEventListener('click', () => { app.coEdit = {...clone(S.companies[b.dataset.cedit]), id: b.dataset.cedit}; renderCompanies(); }));
+  $('#c-cancel')?.addEventListener('click', () => { app.coEdit = null; renderCompanies(); });
+  $('#c-form')?.addEventListener('submit', async e => {
+    e.preventDefault(); const id = ed.id || 'c' + uid();
+    const data = {...(ed.id ? clone(S.companies[ed.id]) : {}), name: $('#c-name').value.trim(), short: $('#c-short').value.trim(), tin: $('#c-tin').value.trim(), address: $('#c-addr').value.trim(), cvPrefix: $('#c-cvp').value.trim() || 'CV', cvNext: parseInt($('#c-cvn').value, 10) || 1, prepared: $('#c-prep').value.trim(), checked: $('#c-chk').value.trim(), approved: $('#c-appr').value.trim()};
+    if (!data.name) return;
+    try { await put('companies', id, data); audit(ed.id ? 'Updated company' : 'Added company', data.name); toast('Company saved.'); app.coEdit = null; renderCompanies(); } catch (err) { writeErr(err); }
+  });
+  $('#b-exp').addEventListener('click', async () => { if (await saveFile(`check-printer-backup-${todayISO()}.json`, JSON.stringify({app: 'check-printer', version: 1, exportedAt: new Date().toISOString(), data: S}, null, 1))) audit('Downloaded backup', ''); });
+  $('#b-imp').addEventListener('change', e => {
+    const file = e.target.files[0]; if (!file) return; const rd = new FileReader();
+    rd.onload = () => {
+      try { const j = JSON.parse(rd.result); if (!j.data || !COLS.every(c => typeof (j.data[c] ?? {}) === 'object')) throw 0; app.importData = j.data;
+        const n = c => Object.keys(j.data[c] || {}).length;
+        $('#b-msg').innerHTML = `<div class="msg warn">Restore ${n('companies')} companies, ${n('accounts')} accounts, ${n('layouts')} layouts and ${allChecksIn(j.data)} checks? Records with the same IDs will be replaced. <a id="b-ok">Restore now</a></div>`;
+        $('#b-ok').addEventListener('click', doImport);
+      } catch { $('#b-msg').innerHTML = `<div class="msg bad">That file is not a Check Printer backup.</div>`; }
+    };
+    rd.readAsText(file); e.target.value = '';
+  });
+  const ids = [...new Set(entries.map(a => a.by).filter(id => id && !profileNames[id]))];
+  if (ids.length && USER?.profiles) USER.profiles(ids).then(ps => { let ch = false; for (const id of ids) { const n = ps?.[id]?.name; if (n) { profileNames[id] = n; ch = true; } } if (ch && app.tab === 'companies') renderCompanies(false); }).catch(() => {});
+}
+const allChecksIn = d => Object.values(d.checks || {}).reduce((s, b) => s + Object.keys(b.checks || {}).length, 0);
+async function doImport() {
+  const d = app.importData; if (!d) return; let n = 0;
+  try { for (const c of COLS) for (const [id, v] of Object.entries(d[c] || {})) { await put(c, id, v); n++; } audit('Restored backup', n + ' records'); toast(`Restored ${n} records.`); }
+  catch (e) { writeErr(e); }
+  app.importData = null; $('#b-msg').innerHTML = '';
+}
+
+/* ---------- boot ---------- */
+(function boot() {
+  const h = (location.hash || '').slice(1); if (['write','register','accounts','layouts','companies'].includes(h)) app.tab = h;
+  const local = lsGet(LSKEY, null); if (local) for (const c of COLS) S[c] = local[c] || {};
+  renderAll(true);
+  if (!window.claude?.use) return;
+  claude.use('downloads').then(d => DL = d).catch(() => {});
+  claude.use('user').then(async u => { USER = u; if (!u) return; try { ME.id = await u.id(); const me = await u.me(); ME.name = me?.name || ''; } catch {} }).catch(() => {});
+  claude.use('db').then(db => {
+    if (!db) return; DB = db; S = {companies: {}, accounts: {}, layouts: {}, checks: {}, audit: {}}; renderAll(true);
+    for (const c of COLS) db.collection(c).onSnapshot(snap => {
+      const m = {}; snap.docs.forEach(d => { m[d.id] = d.data(); }); S[c] = m;
+      if (c === 'layouts' && app.layoutDirty === false) app.layoutDraft = null;
+      if (c === 'layouts' || c === 'companies') mounted.layouts = false;
+      scheduleRender();
+    }, err => { if (err?.code !== 'revoked') toast('Live updates stopped (' + err.code + '). Reload the page.', 'warn'); });
+  }).catch(() => {});
+})();
+</script>
+
+<script src="supabase-layer.js"></script>
+</body>
+</html>
