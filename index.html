@@ -62,6 +62,8 @@ button,input,select,textarea{font:inherit;color:inherit}
 .tabs button{background:none;border:0;border-bottom:2px solid transparent;padding:10px 14px;cursor:pointer;color:var(--muted);font-weight:500;white-space:nowrap}
 .tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
 .tabs button:hover{color:var(--ink)}
+.req{color:var(--bad);font-weight:700}
+input[aria-invalid="true"]{border-color:var(--bad)!important;box-shadow:0 0 0 3px var(--bad-soft)}
 
 /* forms */
 .card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px}
@@ -675,7 +677,7 @@ function renderWrite(force) {
         <div class="sec-head"><h2>New check</h2><div class="actions"><span class="hint" id="w-series"></span><button type="button" class="btn sm" id="w-clear-top" title="Clear payee, amount, words, CV no., particulars and entries">Clear form</button></div></div>
         <label class="f">Bank account<select id="w-acct"></select></label>
         <div class="row">
-          <label class="f">Check no.<input id="w-no" class="mono" inputmode="numeric"></label>
+          <label class="f"><span>Check no. <span class="req" title="Required">*</span></span><input id="w-no" class="mono" inputmode="numeric" required aria-required="true"></label>
           <label class="f">Check date<input id="w-date" type="date"></label>
         </div>
         <label class="f">Payee<span class="clr-wrap"><input id="w-payee" list="payees" placeholder="Name exactly as it should appear on the check"><button type="button" class="clr" data-clear="payee" aria-label="Clear payee" title="Clear">×</button></span></label>
@@ -728,7 +730,7 @@ function renderWrite(force) {
     $('#w-clear').addEventListener('click', clearAll); $('#w-clear-top').addEventListener('click', clearAll);
     $('#wf').addEventListener('click', e => { const b = e.target.closest('[data-clear]'); if (!b) return; e.preventDefault(); const k = b.dataset.clear, inp = b.previousElementSibling; d()[k] = ''; inp.value = ''; if (k === 'cvNo') d().cvAuto = true; updateWrite(); if (k === 'cvNo') inp.value = d().cvNo; inp.focus(); });
     $('#w-test').addEventListener('click', async () => { const {acct, L} = syncDraftAuto(); const lay = L || getLayout('std-BDO'); const data = writeData(app.draft, acct); if (!data.amount) Object.assign(data, sampleData(lay), {acctNo: data.acctNo || '001234567890'}); await saveFile(`Alignment-test-${lay.bank}.pdf`, checkPdf(lay, data, true)); });
-    $('#wf').addEventListener('submit', e => { e.preventDefault(); issueCheck(); });
+    $('#wf').addEventListener('submit', e => { e.preventDefault(); if (checkRequired()) issueCheck(); });
     fillWriteInputs();
   }
   updateWrite(true);
@@ -771,7 +773,7 @@ function updateWrite(refreshSelect) {
   if (!companyList().length) m.push(['bad', 'Add your company first. <a data-go="companies">Open Companies</a>']);
   else if (!acct) m.push(['bad', 'Add a bank account and its checkbook series. <a data-go="accounts">Open Bank accounts</a>']);
   if (acct) {
-    if (!no) m.push(['info', `Type the check number printed on the leaf. Next in this checkbook: ${padNo(acct, acct.nextNo || acct.seriesFrom)}.`]);
+    if (!no) m.push(['warn', `<b>Check number is required.</b> Type the number printed on the leaf. Next in this checkbook: ${padNo(acct, acct.nextNo || acct.seriesFrom)}.`]);
     else {
       const ex = findCheck(acct.id, no);
       if (ex) m.push(['bad', `Check ${padNo(acct, no)} is already in the register (${effStatus(ex)}, ${esc(ex.payee || 'spoiled')}). Use Register › PDF to reprint it.`]);
@@ -789,7 +791,9 @@ function updateWrite(refreshSelect) {
   if (data.amount >= 1e12) m.push(['bad', 'Amount is too large.']);
   $('#w-msgs').innerHTML = m.map(([k, h]) => `<div class="msg ${k}">${h}</div>`).join('');
   const blocking = m.some(x => x[0] === 'bad');
-  $('#w-issue').disabled = blocking || !data.amount || !data.payee || !d.date || !no;
+  $('#w-issue').disabled = blocking;
+  const miss = d.tried ? missingFields(d) : [];
+  for (const [sel] of REQ_FIELDS) $(sel).setAttribute('aria-invalid', String(miss.some(x => x[0] === sel)));
   $('#w-no').placeholder = 'Type check no.';
   $('#w-issue').textContent = isPrint() ? 'Issue & print check' : 'Issue check & download PDF';
   $('#w-alsov-lbl').textContent = isPrint() ? ' Also print the check voucher' : ' Also download the check voucher';
@@ -798,6 +802,18 @@ function updateWrite(refreshSelect) {
   $('#w-last').innerHTML = L2 ? `<div class="issued"><div>Issued check <b>${padNo(S.accounts[app.last.accountId], app.last.no)}</b> · ${esc(L2.payee)} · ₱${peso(L2.amount)}</div><div class="actions"><button class="btn sm" data-reprint="${app.last.accountId}|${app.last.no}">${isPrint() ? 'Print check' : 'Check PDF'}</button><button class="btn sm" data-voucher="${app.last.accountId}|${app.last.no}">${isPrint() ? 'Print voucher' : 'Voucher PDF'}</button></div></div>` : '';
 }
 function sampleData(L) { return {date: todayISO(), payee: 'Juan dela Cruz Trading', amount: 125430.5, words: amountWords(125430.5, L?.fields?.words || stdLayout('BDO').fields.words), cvNo: 'CV-' + new Date().getFullYear() + '-0001', acPayee: true, particulars: 'Sample particulars', noStr: '0000123456', acctNo: '001234567890', acctLabel: 'Sample account'}; }
+
+// Required fields: block Issue until they are filled, and say which one is missing.
+const REQ_FIELDS = [['#w-no', 'check number', d => parseInt(d.no, 10) > 0], ['#w-date', 'check date', d => !!d.date], ['#w-payee', 'payee', d => !!d.payee.trim()], ['#w-amt', 'amount', d => parseAmt(d.amount) > 0]];
+const missingFields = d => REQ_FIELDS.filter(([, , ok]) => !ok(d));
+function checkRequired() {
+  const d = app.draft, miss = missingFields(d); d.tried = miss.length > 0;
+  if (!miss.length) return true;
+  updateWrite();
+  toast(miss[0][0] === '#w-no' ? 'Enter the check number first. The check can\u2019t be saved without it.' : 'Enter the ' + miss.map(x => x[1]).join(', ') + ' first.', 'bad');
+  $(miss[0][0])?.focus();
+  return false;
+}
 
 async function issueCheck() {
   const d = app.draft; const {acct, co, L} = syncDraftAuto(); if (!acct) return;
