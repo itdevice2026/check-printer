@@ -184,6 +184,7 @@ table.t tr.voidrow td{background:var(--bad-soft)}
       <div><h1>Check Printer</h1><small>Pre-printed PH bank check stock · PDF output at actual size</small></div>
     </div>
     <label for="co-sel">Company <select id="co-sel"></select></label>
+    <label for="out-sel" id="out-wrap" hidden>Output <select id="out-sel" style="min-width:0"><option value="print">Print directly</option><option value="download">Download PDF</option></select></label>
     <span id="store-chip" class="chip local">This browser only</span>
   </header>
   <nav class="tabs" role="tablist">
@@ -530,7 +531,8 @@ function nextCv(co) { return `${co?.cvPrefix || 'CV'}-${new Date().getFullYear()
 
 /* ---------- downloads ---------- */
 async function saveFile(filename, data) {
-  if (!DL && !window.claude) { // opened as a standalone file in a normal browser
+  if (!DL && !window.claude) { // opened as a standalone file in a normal browser, or the online edition
+    if (/\.pdf$/i.test(filename) && app.outMode === 'print') return printBlob(data instanceof Blob ? data : new Blob([data], {type: 'application/pdf'}));
     const url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data])); const a = document.createElement('a');
     a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000); return true;
   }
@@ -544,9 +546,26 @@ async function saveFile(filename, data) {
   }
 }
 
+// Print a PDF directly: load it in a hidden frame and open the browser's print window.
+function printBlob(blob) {
+  return new Promise(resolve => {
+    const url = URL.createObjectURL(blob.type ? blob : new Blob([blob], {type: 'application/pdf'}));
+    const f = document.createElement('iframe');
+    f.style.cssText = 'position:fixed;right:0;bottom:0;width:10px;height:10px;border:0;opacity:0;pointer-events:none';
+    f.onload = () => setTimeout(() => {
+      try { f.contentWindow.focus(); f.contentWindow.print(); }
+      catch (e) { const w = window.open(url, '_blank'); if (!w) toast('Allow pop-ups for this site, or switch Output to Download PDF.', 'warn'); }
+      setTimeout(() => { f.remove(); URL.revokeObjectURL(url); }, 120000);
+      resolve(true);
+    }, 400);
+    f.src = url; document.body.appendChild(f);
+    toast('Opening the print window. Use Scale: Default / Actual size (not Fit to page).');
+  });
+}
+
 /* ---------- app state ---------- */
 const app = {
-  company: lsGet('mtc-co', 'ALL'), tab: 'write',
+  company: lsGet('mtc-co', 'ALL'), tab: 'write', outMode: lsGet('mtc-out', 'print'),
   draft: null, last: null, voidOpen: null, spoiledOpen: false,
   reg: {account: 'ALL', status: 'ALL', from: '', to: '', q: ''},
   layoutId: null, layoutDraft: null, layoutDirty: false, layoutSel: 'payee',
@@ -576,6 +595,9 @@ function renderTop() {
 $('#co-sel').addEventListener('change', e => { app.company = e.target.value; lsSet('mtc-co', app.company); app.draft.accountId = ''; app.acctEdit = null; app.coEdit = null; renderAll(true); });
 $$('.tabs button').forEach(b => b.addEventListener('click', () => { app.tab = b.dataset.tab; try { history.replaceState(null, '', '#' + app.tab); } catch {} renderAll(true); }));
 function go(tab) { app.tab = tab; renderAll(true); window.scrollTo({top: 0}); }
+const CAN_PRINT = !window.claude;
+if (CAN_PRINT) { $('#out-wrap').hidden = false; $('#out-sel').value = app.outMode; $('#out-sel').addEventListener('change', e => { app.outMode = e.target.value; lsSet('mtc-out', app.outMode); renderAll(true); }); } else app.outMode = 'download';
+const isPrint = () => app.outMode === 'print';
 
 const mounted = {};
 function renderAll(force) {
@@ -634,7 +656,7 @@ function renderWrite(force) {
           <div class="actions" style="margin-top:6px"><button type="button" class="btn sm" id="w-ent-add">Add line</button><span class="hint" id="w-ent-tot"></span></div>
         </details>
         <div class="msgs" id="w-msgs"></div>
-        <label class="inline"><input type="checkbox" id="w-alsov"> Also download the check voucher</label>
+        <label class="inline"><input type="checkbox" id="w-alsov"><span id="w-alsov-lbl"> Also download the check voucher</span></label>
         <div class="actions">
           <button type="submit" class="btn primary" id="w-issue">Issue check &amp; download PDF</button>
           <button type="button" class="btn" id="w-test">Alignment test</button>
@@ -647,7 +669,7 @@ function renderWrite(force) {
           <div class="leaf-head"><h3>Preview on check leaf</h3><span class="hint" id="w-layname"></span></div>
           <div id="w-leaf"></div>
           <ul class="notes">
-            <li>The PDF is sized to the check. Print it at <b>100% / Actual size</b>, never "Fit to page".</li>
+            <li>The check is sized 8" × 3". In the print window use <b>Scale: Default / Actual size (100%)</b>, never "Fit to page". If your printer has no check-size paper, add a custom paper size of 8 × 3 in (203 × 76 mm) in its driver.</li>
             <li>Feed the blank leaf face-up the way your printer's manual feed expects, then check alignment with a test print on plain paper first.</li>
             <li>Only the variable data prints. Bank name, boxes and MICR line shown here are guides.</li>
           </ul>
@@ -730,9 +752,11 @@ function updateWrite(refreshSelect) {
   $('#w-msgs').innerHTML = m.map(([k, h]) => `<div class="msg ${k}">${h}</div>`).join('');
   const blocking = m.some(x => x[0] === 'bad');
   $('#w-issue').disabled = blocking || !data.amount || !data.payee || !d.date;
+  $('#w-issue').textContent = isPrint() ? 'Issue & print check' : 'Issue check & download PDF';
+  $('#w-alsov-lbl').textContent = isPrint() ? ' Also print the check voucher' : ' Also download the check voucher';
   // last issued
   const L2 = app.last && S.accounts[app.last.accountId] && findCheck(app.last.accountId, app.last.no);
-  $('#w-last').innerHTML = L2 ? `<div class="issued"><div>Issued check <b>${padNo(S.accounts[app.last.accountId], app.last.no)}</b> · ${esc(L2.payee)} · ₱${peso(L2.amount)}</div><div class="actions"><button class="btn sm" data-reprint="${app.last.accountId}|${app.last.no}">Check PDF</button><button class="btn sm" data-voucher="${app.last.accountId}|${app.last.no}">Voucher PDF</button></div></div>` : '';
+  $('#w-last').innerHTML = L2 ? `<div class="issued"><div>Issued check <b>${padNo(S.accounts[app.last.accountId], app.last.no)}</b> · ${esc(L2.payee)} · ₱${peso(L2.amount)}</div><div class="actions"><button class="btn sm" data-reprint="${app.last.accountId}|${app.last.no}">${isPrint() ? 'Print check' : 'Check PDF'}</button><button class="btn sm" data-voucher="${app.last.accountId}|${app.last.no}">${isPrint() ? 'Print voucher' : 'Voucher PDF'}</button></div></div>` : '';
 }
 function sampleData(L) { return {date: todayISO(), payee: 'Juan dela Cruz Trading', amount: 125430.5, words: amountWords(125430.5, L?.fields?.words || stdLayout('BDO').fields.words), cvNo: 'CV-' + new Date().getFullYear() + '-0001', acPayee: true, particulars: 'Sample particulars', noStr: '0000123456', acctNo: '001234567890', acctLabel: 'Sample account'}; }
 
@@ -831,8 +855,8 @@ function renderRegister() {
   // rows
   const body = rows.slice(0, 500).map(r => {
     const st = effStatus(r), a = S.accounts[r.accountId], key = r.accountId + '|' + r.no;
-    const acts = st === 'Cleared' ? `<button class="btn sm" data-reprint="${key}">PDF</button><button class="btn sm" data-voucher="${key}">Voucher</button>` : st === 'Voided' ? `<button class="btn sm" data-voucher="${key}">Voucher</button>` :
-      `<button class="btn sm" data-reprint="${key}">PDF</button><button class="btn sm" data-voucher="${key}">Voucher</button>` +
+    const acts = st === 'Cleared' ? `<button class="btn sm" data-reprint="${key}">${isPrint() ? 'Print' : 'PDF'}</button><button class="btn sm" data-voucher="${key}">Voucher</button>` : st === 'Voided' ? `<button class="btn sm" data-voucher="${key}">Voucher</button>` :
+      `<button class="btn sm" data-reprint="${key}">${isPrint() ? 'Print' : 'PDF'}</button><button class="btn sm" data-voucher="${key}">Voucher</button>` +
       (r.status === 'Issued' ? `<button class="btn sm" data-act="Released" data-k="${key}">Released</button>` : '') +
       (r.status !== 'Cleared' ? `<button class="btn sm" data-act="Cleared" data-k="${key}">Cleared</button>` : '') +
       `<button class="btn sm danger" data-act="void" data-k="${key}">Void</button>`;
