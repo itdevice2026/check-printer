@@ -174,13 +174,27 @@ function licRequest(lic, company) {
   return 'CPR1-' + btoa(String.fromCharCode(...new TextEncoder().encode(j))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 async function copyText(t, done) { try { await navigator.clipboard.writeText(t); toast(done); return true; } catch { return false; } }
-const licTerm = l => l.expires ? `Expires ${fmtDate(l.expires, 'MMMM DD, YYYY')}` : 'Perpetual';
-const licDaysLeft = l => l?.expires ? Math.round((Date.parse(l.expires) - Date.parse(l.today)) / 864e5) : null;
+// Expiry is an exact moment (expires_at); shown in Manila time.
+function fmtManila(iso) {
+  const m = new Date(Date.parse(iso) + 8 * 3600e3); let h = m.getUTCHours(); const ap = h < 12 ? 'AM' : 'PM'; h = h % 12 || 12;
+  return `${['January','February','March','April','May','June','July','August','September','October','November','December'][m.getUTCMonth()]} ${m.getUTCDate()}, ${m.getUTCFullYear()} at ${h}:${String(m.getUTCMinutes()).padStart(2, '0')} ${ap}`;
+}
+const licExpAt = l => l?.expires_at || (l?.expires ? l.expires + 'T23:59:59+08:00' : null);
+const licTerm = l => licExpAt(l) ? `Expires ${fmtManila(licExpAt(l))} (Manila)` : 'Perpetual';
+const licMsLeft = l => licExpAt(l) ? Date.parse(licExpAt(l)) - (Date.parse(l.now) || Date.now()) : null;
+const licDaysLeft = l => { const ms = licMsLeft(l); return ms == null ? null : Math.max(0, Math.ceil(ms / 864e5)); };
+const licLeftText = l => { const ms = licMsLeft(l); if (ms == null) return ''; const h = Math.floor(ms / 36e5);
+  return ms < 864e5 ? `expires ${h >= 1 ? 'in ' + h + ' hour' + (h === 1 ? '' : 's') : 'in less than an hour'} (${fmtManila(licExpAt(l))})` : `expires in ${licDaysLeft(l)} day${licDaysLeft(l) === 1 ? '' : 's'} (${fmtManila(licExpAt(l))})`; };
+let CP_LIC_TIMER = null;
+function licWatch() { // lock the screen at the exact expiry moment, even if the page stays open
+  clearTimeout(CP_LIC_TIMER); const ms = licMsLeft(CP_LIC);
+  if (ms != null && ms < 2147e6) CP_LIC_TIMER = setTimeout(() => { CP_STARTED = false; start(); }, Math.max(0, ms) + 1500);
+}
 function showActivate(lic) {
-  const expired = lic.has_key && lic.expires && lic.expires < lic.today;
+  const expired = lic.expired ?? (lic.has_key && licMsLeft(lic) != null && licMsLeft(lic) <= 0);
   gate(`<div class="card form cp-login" id="cp-act" style="max-width:560px">${brandHtml}
     <h2 style="margin:4px 0 0">Activate Check Printer</h2>
-    ${expired ? `<div class="msg bad">The Program Key for <b>${esc(lic.licensee || '')}</b> expired on ${esc(fmtDate(lic.expires, 'MMMM DD, YYYY'))}. Enter a renewal key to continue.</div>`
+    ${expired ? `<div class="msg bad">The Program Key for <b>${esc(lic.licensee || '')}</b> expired on ${esc(fmtManila(licExpAt(lic)))} (Manila). Enter a renewal key to continue.</div>`
       : `<p class="muted" style="margin:0">This copy of the Check Printer System needs a Program Key before it can be used. Copy the activation request below and send it to the developer to get your key.</p>`}
     <div style="border:1px solid var(--line);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--surface-2,transparent)">
       <b style="font-size:13px">Step 1 · Request your Program Key</b>
@@ -218,7 +232,7 @@ renderCompanies = function (force) {
   const host = $('#tab-companies .split > .form'); if (!host || !CP_LIC || $('#cp-lic')) return;
   const l = CP_LIC, isAdmin = CP_ROLE === 'admin', left = licDaysLeft(l);
   host.insertAdjacentHTML('beforeend', `<div class="card form" id="cp-lic"><div class="sec-head"><h2>Licence</h2><span class="hint">Program Key ${esc(l.key_id || '')}</span></div>
-    ${left != null && left <= 30 ? `<div class="msg ${left <= 7 ? 'bad' : 'warn'}">The Program Key expires in ${left} day${left === 1 ? '' : 's'}. Ask the developer for a renewal key.</div>` : ''}
+    ${left != null && left <= 30 ? `<div class="msg ${left <= 7 ? 'bad' : 'warn'}">The Program Key ${esc(licLeftText(l))}. Ask the developer for a renewal key.</div>` : ''}
     <dl class="cp-kv"><dt>Licensed to</dt><dd>${esc(l.licensee || '')}</dd><dt>Term</dt><dd>${esc(licTerm(l))}</dd><dt>Users</dt><dd>${l.active_users} active${l.max_users ? ' of ' + l.max_users + ' allowed' : ' · unlimited'}</dd><dt>Installation ID</dt><dd class="mono">${esc(l.install_id)}</dd></dl>
     <div class="actions"><button type="button" class="btn sm" id="cp-lreq">Copy activation request</button><span class="hint">For renewals or more users, send this to the developer.</span></div>
     ${isAdmin ? `<details><summary style="cursor:pointer;font-weight:600">Enter a new Program Key (renewal or more users)</summary>
@@ -227,7 +241,7 @@ renderCompanies = function (force) {
   $('#cp-lreq').addEventListener('click', async () => { const req = licRequest(l, l.licensee || l.company); if (!await copyText(req, 'Activation request copied. Send it to the developer.')) window.prompt('Copy this activation request:', req); });
   $('#cp-renew')?.addEventListener('submit', async e => {
     e.preventDefault(); const key = $('#cp-rkey').value.trim(); if (!key) return; const b = e.submitter; if (b) b.disabled = true;
-    try { const r = await activateKey(key); CP_LIC = await must(SB.rpc('cp_license_status')); toast(`Program Key ${r.key_id} applied.`); $('#cp-lic').remove(); renderCompanies(); }
+    try { const r = await activateKey(key); CP_LIC = await must(SB.rpc('cp_license_status')); licWatch(); toast(`Program Key ${r.key_id} applied.`); $('#cp-lic').remove(); renderCompanies(); }
     catch (err) { toast(err.message, 'bad'); if (b) b.disabled = false; }
   });
 };
@@ -389,7 +403,8 @@ async function startInner() {
   for (const k in mounted) delete mounted[k];
   gate(''); renderAll(true);
   const left = licDaysLeft(CP_LIC);
-  if (left != null && left <= 30 && !CP_LIC_WARNED) { CP_LIC_WARNED = true; toast(`The Program Key expires in ${left} day${left === 1 ? '' : 's'}. Ask the developer for a renewal key.`, 'warn'); }
+  if (left != null && left <= 30 && !CP_LIC_WARNED) { CP_LIC_WARNED = true; toast(`The Program Key ${licLeftText(CP_LIC)}. Ask the developer for a renewal key.`, 'warn'); }
+  licWatch();
 }
 SB.auth.onAuthStateChange((event, session) => {
   CP_SESSION = session;
