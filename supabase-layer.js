@@ -160,6 +160,58 @@ function showNoAccess(email) {
   $('#cp-out2').addEventListener('click', () => SB.auth.signOut());
 }
 
+/* ---------- licensing: Program Key (System Developed By: Nomer Sta Ana) ---------- */
+let CP_LIC = null, CP_LIC_WARNED = false;
+async function activateKey(key) {
+  const {data, error} = await SB.functions.invoke('cp-activate', {body: {key}});
+  if (error) { let msg = error.message; try { const j = await error.context.json(); msg = j.error || msg; } catch {} throw new Error(msg); }
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+const licTerm = l => l.expires ? `Expires ${fmtDate(l.expires, 'MMMM DD, YYYY')}` : 'Perpetual';
+const licDaysLeft = l => l?.expires ? Math.round((Date.parse(l.expires) - Date.parse(l.today)) / 864e5) : null;
+function showActivate(lic) {
+  const expired = lic.has_key && lic.expires && lic.expires < lic.today;
+  gate(`<div class="card form cp-login" id="cp-act" style="max-width:560px">${brandHtml}
+    <h2 style="margin:4px 0 0">Activate Check Printer</h2>
+    ${expired ? `<div class="msg bad">The Program Key for <b>${esc(lic.licensee || '')}</b> expired on ${esc(fmtDate(lic.expires, 'MMMM DD, YYYY'))}. Enter a renewal key to continue.</div>`
+      : `<p class="muted" style="margin:0">This copy of the Check Printer System needs a Program Key before it can be used. Send the Installation ID below to the developer to get your key.</p>`}
+    <label class="f">Installation ID<span style="display:flex;gap:8px"><input id="cp-inst" class="mono" readonly value="${esc(lic.install_id)}" style="font-size:16px;letter-spacing:.04em;font-weight:600"><button type="button" class="btn" id="cp-icopy">Copy</button></span></label>
+    ${lic.caller_admin ? `<form id="cp-actf" style="display:contents"><label class="f">Program Key<textarea id="cp-key" class="mono" rows="5" placeholder="Paste the whole key here. It starts with CPK1-" spellcheck="false" autocomplete="off"></textarea></label>
+      <div id="cp-actmsg"></div>
+      <div class="actions"><button class="btn primary" id="cp-actgo">Activate</button><button type="button" class="btn" id="cp-out3">Sign out</button></div></form>`
+      : `<div class="msg warn">Only a Check Printer administrator can enter the Program Key. Ask your administrator to sign in and activate the system.</div><div class="actions"><button type="button" class="btn" id="cp-out3">Sign out</button></div>`}
+    <p class="hint" style="margin:0">System Developed By: <b>Nomer Sta Ana</b></p>
+  </div>`);
+  $('#cp-icopy').addEventListener('click', async () => { try { await navigator.clipboard.writeText(lic.install_id); toast('Installation ID copied.'); } catch { $('#cp-inst').select(); } });
+  $('#cp-out3').addEventListener('click', () => SB.auth.signOut());
+  $('#cp-actf')?.addEventListener('submit', async e => {
+    e.preventDefault(); const key = $('#cp-key').value.trim(), b = $('#cp-actgo');
+    if (!key) { $('#cp-actmsg').innerHTML = `<div class="msg bad">Paste the Program Key first.</div>`; $('#cp-key').focus(); return; }
+    b.disabled = true; b.textContent = 'Checking key…';
+    try { const r = await activateKey(key); toast(`Activated for ${r.licensee}. Thank you!`); CP_STARTED = false; await start(); }
+    catch (err) { $('#cp-actmsg').innerHTML = `<div class="msg bad">${esc(err.message)}</div>`; b.disabled = false; b.textContent = 'Activate'; }
+  });
+  $(lic.caller_admin ? '#cp-key' : '#cp-out3').focus();
+}
+const _renderCompanies3 = renderCompanies;
+renderCompanies = function (force) {
+  _renderCompanies3(force);
+  const host = $('#tab-companies .split > .form'); if (!host || !CP_LIC || $('#cp-lic')) return;
+  const l = CP_LIC, isAdmin = CP_ROLE === 'admin', left = licDaysLeft(l);
+  host.insertAdjacentHTML('beforeend', `<div class="card form" id="cp-lic"><div class="sec-head"><h2>Licence</h2><span class="hint">Program Key ${esc(l.key_id || '')}</span></div>
+    ${left != null && left <= 30 ? `<div class="msg ${left <= 7 ? 'bad' : 'warn'}">The Program Key expires in ${left} day${left === 1 ? '' : 's'}. Ask the developer for a renewal key.</div>` : ''}
+    <dl class="cp-kv"><dt>Licensed to</dt><dd>${esc(l.licensee || '')}</dd><dt>Term</dt><dd>${esc(licTerm(l))}</dd><dt>Users</dt><dd>${l.active_users} active${l.max_users ? ' of ' + l.max_users + ' allowed' : ' · unlimited'}</dd><dt>Installation ID</dt><dd class="mono">${esc(l.install_id)}</dd></dl>
+    ${isAdmin ? `<details><summary style="cursor:pointer;font-weight:600">Enter a new Program Key (renewal or more users)</summary>
+      <form id="cp-renew" style="margin-top:10px"><label class="f">Program Key<textarea id="cp-rkey" class="mono" rows="4" placeholder="CPK1-…" spellcheck="false"></textarea></label><div class="actions"><button class="btn primary">Apply key</button></div></form></details>` : ''}
+    <p class="hint" style="margin:0">System Developed By: <b>Nomer Sta Ana</b></p></div>`);
+  $('#cp-renew')?.addEventListener('submit', async e => {
+    e.preventDefault(); const key = $('#cp-rkey').value.trim(); if (!key) return; const b = e.submitter; if (b) b.disabled = true;
+    try { const r = await activateKey(key); CP_LIC = await must(SB.rpc('cp_license_status')); toast(`Program Key ${r.key_id} applied.`); $('#cp-lic').remove(); renderCompanies(); }
+    catch (err) { toast(err.message, 'bad'); if (b) b.disabled = false; }
+  });
+};
+
 /* ---------- user management (admins) ---------- */
 const _renderCompanies = renderCompanies;
 renderCompanies = function (force) {
@@ -206,6 +258,7 @@ document.head.insertAdjacentHTML('beforeend', `<style id="cp-pay-css">
 #cp-pmanage:hover{background:var(--accent-soft);border-color:var(--accent);text-decoration:underline;text-underline-offset:2px}
 #cp-pmanage:hover span{transform:translateX(3px)}
 #cp-pmanage:focus-visible{outline:2px solid var(--focus,var(--accent));outline-offset:2px}
+.cp-kv{display:grid;grid-template-columns:120px 1fr;gap:6px 12px;margin:0;font-size:13px}.cp-kv dt{color:var(--muted)}.cp-kv dd{margin:0;font-weight:600;word-break:break-word}
 </style>`);
 /* ---------- programmer credit (shown on the sign-in screen and in the app) ---------- */
 if (!document.getElementById('cp-credit')) {
@@ -305,6 +358,8 @@ async function startInner() {
   const {data: {session}} = await SB.auth.getSession(); CP_SESSION = session;
   if (!session) { CP_STARTED = false; showLogin(); return; }
   gate('<div class="card cp-login"><p class="muted">Loading records…</p></div>');
+  try { CP_LIC = await must(SB.rpc('cp_license_status')); } catch { CP_LIC = null; }
+  if (CP_LIC && !CP_LIC.licensed) { CP_STARTED = false; showActivate(CP_LIC); return; }
   const email = session.user.email.toLowerCase();
   const {data: me, error} = await SB.from('cp_allowed_users').select('*').eq('email', email).maybeSingle();
   if (error || !me || !me.active) { showNoAccess(email); return; }
@@ -313,6 +368,8 @@ async function startInner() {
   DB = SB; CP_STARTED = true;
   for (const k in mounted) delete mounted[k];
   gate(''); renderAll(true);
+  const left = licDaysLeft(CP_LIC);
+  if (left != null && left <= 30 && !CP_LIC_WARNED) { CP_LIC_WARNED = true; toast(`The Program Key expires in ${left} day${left === 1 ? '' : 's'}. Ask the developer for a renewal key.`, 'warn'); }
 }
 SB.auth.onAuthStateChange((event, session) => {
   CP_SESSION = session;
