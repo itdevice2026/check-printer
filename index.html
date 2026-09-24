@@ -153,6 +153,12 @@ table.t tr.voidrow td{background:var(--bad-soft)}
 .mini label.f{font-size:11px}
 .mini input,.mini select{padding:5px 7px!important;font-size:13px!important}
 .dirty{color:var(--warn);font-size:12px;font-weight:600}
+.clr-wrap{position:relative;display:block}
+.clr-wrap input,.clr-wrap textarea{padding-right:32px!important}
+.clr{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:22px;height:22px;border:0;border-radius:50%;background:var(--surface-2);color:var(--muted);cursor:pointer;font-size:15px;line-height:22px;padding:0;text-align:center}
+.clr:hover{background:var(--line);color:var(--ink)}
+.clr-wrap.ta .clr{top:8px;transform:none}
+.clr-wrap :placeholder-shown + .clr{display:none}
 
 #toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);display:flex;flex-direction:column;gap:6px;z-index:10;width:min(460px,calc(100% - 32px))}
 #toast div{background:var(--ink);color:var(--bg);padding:10px 14px;border-radius:8px;font-size:13px;box-shadow:0 8px 24px -8px rgba(0,0,0,.4)}
@@ -606,23 +612,23 @@ function renderWrite(force) {
     mounted.write = true;
     el.innerHTML = `<div class="split">
       <form id="wf" class="card form" autocomplete="off" novalidate>
-        <div class="sec-head"><h2>New check</h2><span class="hint" id="w-series"></span></div>
+        <div class="sec-head"><h2>New check</h2><div class="actions"><span class="hint" id="w-series"></span><button type="button" class="btn sm" id="w-clear-top" title="Clear payee, amount, words, CV no., particulars and entries">Clear form</button></div></div>
         <label class="f">Bank account<select id="w-acct"></select></label>
         <div class="row">
           <label class="f">Check no.<input id="w-no" class="mono" inputmode="numeric"></label>
           <label class="f">Check date<input id="w-date" type="date"></label>
         </div>
-        <label class="f">Payee<input id="w-payee" list="payees" placeholder="Name exactly as it should appear on the check"></label>
-        <label class="f">Amount (PHP)<input id="w-amt" class="big" inputmode="decimal" placeholder="0.00"></label>
+        <label class="f">Payee<span class="clr-wrap"><input id="w-payee" list="payees" placeholder="Name exactly as it should appear on the check"><button type="button" class="clr" data-clear="payee" aria-label="Clear payee" title="Clear">×</button></span></label>
+        <label class="f">Amount (PHP)<span class="clr-wrap"><input id="w-amt" class="big" inputmode="decimal" placeholder="0.00"><button type="button" class="clr" data-clear="amount" aria-label="Clear amount" title="Clear">×</button></span></label>
         <div class="f" style="display:flex;flex-direction:column;gap:4px">
           <div class="sec-head"><span class="hint" style="font-weight:500">Amount in words</span><label class="inline hint"><input type="checkbox" id="w-wm"> Edit manually</label></div>
           <textarea id="w-words" rows="3" readonly></textarea>
         </div>
         <div class="row">
-          <label class="f">CV no.<input id="w-cv" class="mono"></label>
+          <label class="f">CV no.<span class="clr-wrap"><input id="w-cv" class="mono" placeholder="Auto"><button type="button" class="clr" data-clear="cvNo" aria-label="Reset CV number to automatic" title="Reset to automatic">×</button></span></label>
           <label class="inline" style="align-self:end;padding-bottom:8px"><input type="checkbox" id="w-ac"> Cross: A/C PAYEE ONLY</label>
         </div>
-        <label class="f">Particulars (voucher)<textarea id="w-part" rows="3" placeholder="e.g. Payment for Invoice #1234, delivery of frozen pork cuts"></textarea></label>
+        <label class="f">Particulars (voucher)<span class="clr-wrap ta"><textarea id="w-part" rows="3" placeholder="e.g. Payment for Invoice #1234, delivery of frozen pork cuts"></textarea><button type="button" class="clr" data-clear="particulars" aria-label="Clear particulars" title="Clear">×</button></span></label>
         <details id="w-ent"><summary>Accounting entries on the voucher</summary>
           <table class="entries"><tbody id="w-ent-body"></tbody></table>
           <div class="actions" style="margin-top:6px"><button type="button" class="btn sm" id="w-ent-add">Add line</button><span class="hint" id="w-ent-tot"></span></div>
@@ -632,7 +638,7 @@ function renderWrite(force) {
         <div class="actions">
           <button type="submit" class="btn primary" id="w-issue">Issue check &amp; download PDF</button>
           <button type="button" class="btn" id="w-test">Alignment test</button>
-          <button type="button" class="btn" id="w-clear">Clear</button>
+          <button type="button" class="btn" id="w-clear">Clear form</button>
         </div>
       </form>
       <div class="sticky">
@@ -658,7 +664,9 @@ function renderWrite(force) {
     $('#w-ent-add').addEventListener('click', () => { d().entries.push({acct: '', dr: '', cr: ''}); renderEntries(); });
     $('#w-ent-body').addEventListener('input', e => { const i = +e.target.dataset.i, k = e.target.dataset.k; if (k) { d().entries[i][k] = e.target.value; entTotals(); } });
     $('#w-ent-body').addEventListener('click', e => { const b = e.target.closest('[data-del]'); if (b) { d().entries.splice(+b.dataset.del, 1); renderEntries(); } });
-    $('#w-clear').addEventListener('click', () => { app.draft = newDraft(app.draft.accountId); renderWrite(true); });
+    const clearAll = () => { const keep = app.draft; app.draft = newDraft(keep.accountId); app.draft.alsoVoucher = keep.alsoVoucher; renderWrite(true); toast('Form cleared.'); $('#w-payee').focus(); };
+    $('#w-clear').addEventListener('click', clearAll); $('#w-clear-top').addEventListener('click', clearAll);
+    $('#wf').addEventListener('click', e => { const b = e.target.closest('[data-clear]'); if (!b) return; e.preventDefault(); const k = b.dataset.clear, inp = b.previousElementSibling; d()[k] = ''; inp.value = ''; if (k === 'cvNo') d().cvAuto = true; updateWrite(); if (k === 'cvNo') inp.value = d().cvNo; inp.focus(); });
     $('#w-test').addEventListener('click', async () => { const {acct, L} = syncDraftAuto(); const lay = L || getLayout('std-BDO'); const data = writeData(app.draft, acct); if (!data.amount) Object.assign(data, sampleData(lay), {acctNo: data.acctNo || '001234567890'}); await saveFile(`Alignment-test-${lay.bank}.pdf`, checkPdf(lay, data, true)); });
     $('#wf').addEventListener('submit', e => { e.preventDefault(); issueCheck(); });
     fillWriteInputs();
