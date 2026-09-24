@@ -200,6 +200,13 @@ if (!document.querySelector('.tabs [data-tab="payees"]')) {
   document.querySelector('.tabs [data-tab="payees"]').addEventListener('click', () => { app.tab = 'payees'; try { history.replaceState(null, '', '#payees'); } catch {} renderAll(true); });
   if (location.hash === '#payees') app.tab = 'payees';
 }
+document.head.insertAdjacentHTML('beforeend', `<style id="cp-pay-css">
+#cp-pmanage{margin-left:auto;display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:999px;color:var(--accent);font-weight:600;text-decoration:none;cursor:pointer;border:1px solid transparent;transition:background .15s,border-color .15s,color .15s}
+#cp-pmanage span{transition:transform .15s}
+#cp-pmanage:hover{background:var(--accent-soft);border-color:var(--accent);text-decoration:underline;text-underline-offset:2px}
+#cp-pmanage:hover span{transform:translateX(3px)}
+#cp-pmanage:focus-visible{outline:2px solid var(--focus,var(--accent));outline-offset:2px}
+</style>`);
 const _renderAll = renderAll;
 renderAll = function (force) {
   _renderAll(force);
@@ -208,7 +215,7 @@ renderAll = function (force) {
   const pi = $('#w-payee'); if (!pi) return;
   pi.placeholder = 'Type a name, or choose a saved payee';
   if (!$('#cp-psave')) {
-    pi.closest('.clr-wrap').insertAdjacentHTML('afterend', `<span id="cp-pline" class="hint" style="display:flex;gap:8px;align-items:center;min-height:26px"><span id="cp-pstat"></span><button type="button" class="btn sm" id="cp-psave" style="display:none">+ Save to payees</button><a id="cp-pmanage" style="cursor:pointer;margin-left:auto">Manage payees</a></span>`);
+    pi.closest('.clr-wrap').insertAdjacentHTML('afterend', `<span id="cp-pline" class="hint" style="display:flex;gap:8px;align-items:center;min-height:26px"><span id="cp-pstat"></span><button type="button" class="btn sm" id="cp-psave" style="display:none">+ Save to payees</button><a id="cp-pmanage" href="#payees" title="Open the Payees tab to add, edit or remove payees">Manage payees <span aria-hidden="true">→</span></a></span>`);
     pi.addEventListener('input', payeeHint);
     $('#cp-psave').addEventListener('click', async e => {
       e.preventDefault(); e.stopPropagation(); const b = e.currentTarget; b.disabled = true;
