@@ -5,7 +5,7 @@
 'use strict';
 const CP_CONFIG = window.CP_CONFIG || {};
 const SB = window.supabase.createClient(CP_CONFIG.supabaseUrl, CP_CONFIG.supabaseKey, {auth: {persistSession: true, autoRefreshToken: true}});
-let CP_SESSION = null, CP_ROLE = null, CP_USERS = [], CP_CHANNEL = null;
+let CP_SESSION = null, CP_ROLE = null, CP_USERS = [], CP_CHANNEL = null, CP_PAYEES = [];
 
 /* ---------- row <-> app object mapping ---------- */
 const coFromRow = r => ({name: r.name, short: r.short, tin: r.tin, address: r.address, cvPrefix: r.cv_prefix, cvNext: r.cv_next, prepared: r.prepared, checked: r.checked, approved: r.approved});
@@ -28,6 +28,7 @@ function applyRow(table, row, deleted) {
   }
   else if (table === 'cp_audit') { const e = {...(S.audit.all?.entries || {})}; e[row.id] = {t: row.at, by: row.user_id, byName: row.user_email, action: row.action, detail: row.detail}; S.audit = {all: {entries: e}}; }
   else if (table === 'cp_allowed_users') { CP_USERS = CP_USERS.filter(u => u.email !== row.email); if (!deleted) CP_USERS.push(row); }
+  else if (table === 'cp_payees') { CP_PAYEES = CP_PAYEES.filter(p => p.id !== row.id); if (!deleted) CP_PAYEES.push(row); }
   scheduleRender();
 }
 function cpErr(error) {
@@ -112,19 +113,20 @@ deleteCheck = async function (acctId, no, reason) {
 async function refreshRows() {
   const [cos, acs, au] = await Promise.all([must(SB.from('cp_companies').select('*')), must(SB.from('cp_accounts').select('*')), must(SB.from('cp_audit').select('*').order('at', {ascending: false}).limit(20))]);
   cos.forEach(r => applyRow('cp_companies', r)); acs.forEach(r => applyRow('cp_accounts', r)); au.forEach(r => applyRow('cp_audit', r));
+  CP_PAYEES = await must(SB.from('cp_payees').select('*').order('name').limit(5000)); scheduleRender();
 }
 
 /* ---------- loading & live updates ---------- */
 async function loadAll() {
   const all = async (t, order) => { let out = [], from = 0; for (;;) { const rows = await must(SB.from(t).select('*').order(order).range(from, from + 999)); out = out.concat(rows); if (rows.length < 1000) return out; from += 1000; } };
-  const [cos, acs, lays, cks, au, users] = await Promise.all([all('cp_companies', 'id'), all('cp_accounts', 'id'), all('cp_layouts', 'id'), all('cp_checks', 'id'),
-    must(SB.from('cp_audit').select('*').order('at', {ascending: false}).limit(300)), must(SB.from('cp_allowed_users').select('*').order('email'))]);
+  const [cos, acs, lays, cks, au, users, pays] = await Promise.all([all('cp_companies', 'id'), all('cp_accounts', 'id'), all('cp_layouts', 'id'), all('cp_checks', 'id'),
+    must(SB.from('cp_audit').select('*').order('at', {ascending: false}).limit(300)), must(SB.from('cp_allowed_users').select('*').order('email')), all('cp_payees', 'name')]);
   S = {companies: {}, accounts: {}, layouts: {}, checks: {}, audit: {}};
   cos.forEach(r => S.companies[r.id] = coFromRow(r)); acs.forEach(r => S.accounts[r.id] = acFromRow(r)); lays.forEach(r => S.layouts[r.id] = r.data);
-  cks.forEach(r => applyRow('cp_checks', r)); au.forEach(r => applyRow('cp_audit', r)); CP_USERS = users;
+  cks.forEach(r => applyRow('cp_checks', r)); au.forEach(r => applyRow('cp_audit', r)); CP_USERS = users; CP_PAYEES = pays;
   if (CP_CHANNEL) SB.removeChannel(CP_CHANNEL);
   CP_CHANNEL = SB.channel('cp-live');
-  for (const t of ['cp_companies', 'cp_accounts', 'cp_layouts', 'cp_checks', 'cp_audit', 'cp_allowed_users'])
+  for (const t of ['cp_companies', 'cp_accounts', 'cp_layouts', 'cp_checks', 'cp_audit', 'cp_allowed_users', 'cp_payees'])
     CP_CHANNEL.on('postgres_changes', {event: '*', schema: 'public', table: t}, p => applyRow(t, p.eventType === 'DELETE' ? p.old : p.new, p.eventType === 'DELETE'));
   CP_CHANNEL.subscribe();
 }
@@ -178,6 +180,45 @@ renderCompanies = function (force) {
       if (b.dataset.uact === 'toggle') { applyRow('cp_allowed_users', await must(SB.from('cp_allowed_users').update({active: !u.active}).eq('email', email).select().single())); audit(u.active ? 'Disabled user' : 'Enabled user', email); }
       else { await must(SB.from('cp_allowed_users').delete().eq('email', email)); applyRow('cp_allowed_users', u, true); audit('Removed user', email); }
     } catch (err) { writeErr(err); }
+  });
+};
+
+/* ---------- payees (saved automatically when a check is issued) ---------- */
+const _renderAll = renderAll;
+renderAll = function (force) {
+  _renderAll(force);
+  const pi = $('#w-payee'); if (pi) pi.placeholder = 'Type a name, or choose a saved payee';
+  const dl = $('#payees'); if (!dl) return;
+  dl.innerHTML = CP_PAYEES.slice().sort((a, b) => (b.use_count - a.use_count) || a.name.localeCompare(b.name)).slice(0, 2000).map(p => `<option value="${esc(p.name)}">${p.use_count ? 'used ' + p.use_count + '×' : 'saved'}</option>`).join('');
+};
+let cpPayQ = '', cpPayDel = null;
+function payeeRows() {
+  const q = cpPayQ.trim().toLowerCase(), isAdmin = CP_ROLE === 'admin';
+  const list = CP_PAYEES.filter(p => !q || p.name.toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name));
+  return list.slice(0, 300).map(p => `<tr><td>${esc(p.name)}</td><td class="r mono">${p.use_count}</td><td class="mono">${esc(p.last_used || '—')}</td><td>${isAdmin ? (cpPayDel === p.id ? `<button class="btn sm danger" data-pdel-ok="${p.id}">Confirm remove</button>` : `<button class="btn sm" data-pdel="${p.id}">Remove</button>`) : ''}</td></tr>`).join('')
+    || `<tr><td colspan="4" class="empty">${CP_PAYEES.length ? 'No payee matches.' : 'Payees are added here automatically when you issue a check.'}</td></tr>`;
+}
+const _renderCompanies2 = renderCompanies;
+renderCompanies = function (force) {
+  _renderCompanies2(force);
+  const host = $('#tab-companies .split > .form'); if (!host) return;
+  if ($('#cp-payees')) { $('#cp-plist').innerHTML = payeeRows(); $('#cp-pcount').textContent = CP_PAYEES.length; return; }
+  host.insertAdjacentHTML('beforeend', `<div class="card form" id="cp-payees"><div class="sec-head"><h2>Payees</h2><span class="hint"><span id="cp-pcount">${CP_PAYEES.length}</span> saved · added automatically when a check is issued</span></div>
+    <div class="row"><label class="f">Search<input id="cp-pq" placeholder="Type a name" value="${esc(cpPayQ)}"></label><form id="cp-padd" style="display:contents"><label class="f">Add a payee<input id="cp-pname" placeholder="Name as printed, then Enter"></label></form></div>
+    <div class="table-wrap" style="border:0;max-height:340px;overflow:auto"><table class="t"><thead><tr><th>Payee</th><th class="r">Checks</th><th>Last used</th><th></th></tr></thead><tbody id="cp-plist">${payeeRows()}</tbody></table></div></div>`);
+  $('#cp-pq').addEventListener('input', e => { cpPayQ = e.target.value; $('#cp-plist').innerHTML = payeeRows(); });
+  $('#cp-padd').addEventListener('submit', async e => {
+    e.preventDefault(); const name = $('#cp-pname').value.trim().replace(/\s+/g, ' '); if (!name) return;
+    try { applyRow('cp_payees', await must(SB.from('cp_payees').insert({name}).select().single())); $('#cp-pname').value = ''; toast('Payee saved.'); audit('Added payee', name); }
+    catch (err) { toast(err.code === '23505' ? 'That payee is already saved.' : err.message, 'warn'); }
+  });
+  $('#cp-payees').addEventListener('click', async e => {
+    const d1 = e.target.closest('[data-pdel]'); if (d1) { cpPayDel = d1.dataset.pdel; $('#cp-plist').innerHTML = payeeRows(); return; }
+    const d2 = e.target.closest('[data-pdel-ok]'); if (!d2) return;
+    const id = d2.dataset.pdelOk, p = CP_PAYEES.find(x => x.id === id);
+    try { const rows = await must(SB.from('cp_payees').delete().eq('id', id).select('id')); if (!rows.length) throw new Error('Only an administrator can remove payees.'); applyRow('cp_payees', {id}, true); audit('Removed payee', p?.name || ''); }
+    catch (err) { writeErr(err); }
+    cpPayDel = null; if ($('#cp-plist')) $('#cp-plist').innerHTML = payeeRows();
   });
 };
 
