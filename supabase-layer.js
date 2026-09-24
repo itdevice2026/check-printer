@@ -168,6 +168,12 @@ async function activateKey(key) {
   if (data?.error) throw new Error(data.error);
   return data;
 }
+// Activation request: everything the developer needs to make the key, in one code the customer copies.
+function licRequest(lic, company) {
+  const j = JSON.stringify({r: 1, i: lic.install_id, c: String(company || '').trim(), e: CP_SESSION?.user?.email || '', u: lic.active_users || 0, d: lic.today || ''});
+  return 'CPR1-' + btoa(String.fromCharCode(...new TextEncoder().encode(j))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+async function copyText(t, done) { try { await navigator.clipboard.writeText(t); toast(done); return true; } catch { return false; } }
 const licTerm = l => l.expires ? `Expires ${fmtDate(l.expires, 'MMMM DD, YYYY')}` : 'Perpetual';
 const licDaysLeft = l => l?.expires ? Math.round((Date.parse(l.expires) - Date.parse(l.today)) / 864e5) : null;
 function showActivate(lic) {
@@ -175,15 +181,27 @@ function showActivate(lic) {
   gate(`<div class="card form cp-login" id="cp-act" style="max-width:560px">${brandHtml}
     <h2 style="margin:4px 0 0">Activate Check Printer</h2>
     ${expired ? `<div class="msg bad">The Program Key for <b>${esc(lic.licensee || '')}</b> expired on ${esc(fmtDate(lic.expires, 'MMMM DD, YYYY'))}. Enter a renewal key to continue.</div>`
-      : `<p class="muted" style="margin:0">This copy of the Check Printer System needs a Program Key before it can be used. Send the Installation ID below to the developer to get your key.</p>`}
-    <label class="f">Installation ID<span style="display:flex;gap:8px"><input id="cp-inst" class="mono" readonly value="${esc(lic.install_id)}" style="font-size:16px;letter-spacing:.04em;font-weight:600"><button type="button" class="btn" id="cp-icopy">Copy</button></span></label>
+      : `<p class="muted" style="margin:0">This copy of the Check Printer System needs a Program Key before it can be used. Copy the activation request below and send it to the developer to get your key.</p>`}
+    <div style="border:1px solid var(--line);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--surface-2,transparent)">
+      <b style="font-size:13px">Step 1 · Request your Program Key</b>
+      <label class="f">Installation ID (created automatically for this system)<span style="display:flex;gap:8px"><input id="cp-inst" class="mono" readonly value="${esc(lic.install_id)}" style="font-size:16px;letter-spacing:.04em;font-weight:600"><button type="button" class="btn" id="cp-icopy">Copy</button></span></label>
+      <label class="f">Company name for the licence<input id="cp-rco" value="${esc(lic.company || '')}" placeholder="Your company name"></label>
+      <div class="actions"><button type="button" class="btn primary" id="cp-rcopy">Copy activation request</button><span class="hint">Send it to the developer by email or chat.</span></div>
+      <textarea id="cp-rtext" class="mono" rows="3" readonly hidden style="font-size:12px"></textarea>
+    </div>
+    ${lic.caller_admin ? '<b style="font-size:13px">Step 2 · Enter the Program Key you receive</b>' : ''}
     ${lic.caller_admin ? `<form id="cp-actf" style="display:contents"><label class="f">Program Key<textarea id="cp-key" class="mono" rows="5" placeholder="Paste the whole key here. It starts with CPK1-" spellcheck="false" autocomplete="off"></textarea></label>
       <div id="cp-actmsg"></div>
       <div class="actions"><button class="btn primary" id="cp-actgo">Activate</button><button type="button" class="btn" id="cp-out3">Sign out</button></div></form>`
       : `<div class="msg warn">Only a Check Printer administrator can enter the Program Key. Ask your administrator to sign in and activate the system.</div><div class="actions"><button type="button" class="btn" id="cp-out3">Sign out</button></div>`}
     <p class="hint" style="margin:0">System Developed By: <b>Nomer Sta Ana</b></p>
   </div>`);
-  $('#cp-icopy').addEventListener('click', async () => { try { await navigator.clipboard.writeText(lic.install_id); toast('Installation ID copied.'); } catch { $('#cp-inst').select(); } });
+  $('#cp-icopy').addEventListener('click', async () => { if (!await copyText(lic.install_id, 'Installation ID copied.')) $('#cp-inst').select(); });
+  $('#cp-rcopy').addEventListener('click', async () => {
+    const co = $('#cp-rco').value.trim(); if (!co) { toast('Enter your company name first.', 'warn'); $('#cp-rco').focus(); return; }
+    const req = licRequest(lic, co), ta = $('#cp-rtext'); ta.value = req; ta.hidden = false;
+    if (!await copyText(req, 'Activation request copied. Send it to the developer.')) { ta.focus(); ta.select(); toast('Select the request text and copy it.', 'warn'); }
+  });
   $('#cp-out3').addEventListener('click', () => SB.auth.signOut());
   $('#cp-actf')?.addEventListener('submit', async e => {
     e.preventDefault(); const key = $('#cp-key').value.trim(), b = $('#cp-actgo');
@@ -202,9 +220,11 @@ renderCompanies = function (force) {
   host.insertAdjacentHTML('beforeend', `<div class="card form" id="cp-lic"><div class="sec-head"><h2>Licence</h2><span class="hint">Program Key ${esc(l.key_id || '')}</span></div>
     ${left != null && left <= 30 ? `<div class="msg ${left <= 7 ? 'bad' : 'warn'}">The Program Key expires in ${left} day${left === 1 ? '' : 's'}. Ask the developer for a renewal key.</div>` : ''}
     <dl class="cp-kv"><dt>Licensed to</dt><dd>${esc(l.licensee || '')}</dd><dt>Term</dt><dd>${esc(licTerm(l))}</dd><dt>Users</dt><dd>${l.active_users} active${l.max_users ? ' of ' + l.max_users + ' allowed' : ' · unlimited'}</dd><dt>Installation ID</dt><dd class="mono">${esc(l.install_id)}</dd></dl>
+    <div class="actions"><button type="button" class="btn sm" id="cp-lreq">Copy activation request</button><span class="hint">For renewals or more users, send this to the developer.</span></div>
     ${isAdmin ? `<details><summary style="cursor:pointer;font-weight:600">Enter a new Program Key (renewal or more users)</summary>
       <form id="cp-renew" style="margin-top:10px"><label class="f">Program Key<textarea id="cp-rkey" class="mono" rows="4" placeholder="CPK1-…" spellcheck="false"></textarea></label><div class="actions"><button class="btn primary">Apply key</button></div></form></details>` : ''}
     <p class="hint" style="margin:0">System Developed By: <b>Nomer Sta Ana</b></p></div>`);
+  $('#cp-lreq').addEventListener('click', async () => { const req = licRequest(l, l.licensee || l.company); if (!await copyText(req, 'Activation request copied. Send it to the developer.')) window.prompt('Copy this activation request:', req); });
   $('#cp-renew')?.addEventListener('submit', async e => {
     e.preventDefault(); const key = $('#cp-rkey').value.trim(); if (!key) return; const b = e.submitter; if (b) b.disabled = true;
     try { const r = await activateKey(key); CP_LIC = await must(SB.rpc('cp_license_status')); toast(`Program Key ${r.key_id} applied.`); $('#cp-lic').remove(); renderCompanies(); }
