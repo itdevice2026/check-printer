@@ -246,7 +246,7 @@ function amountWords(amt, o = {}) {
   const iw = n => o.hyphen === false ? intWords(n).replace(/-/g, ' ') : intWords(n);
   const parts = [];
   if (p) parts.push(iw(p) + (o.pesoWord === false ? '' : p === 1 ? ' PESO' : ' PESOS'));
-  if (c) parts.push(o.style === 'centavos' ? iw(c) + (c === 1 ? ' CENTAVO' : ' CENTAVOS') : String(c).padStart(2, '0') + '/100');
+  if (c) parts.push(o.style === 'centavos' ? iw(c) + (c === 1 ? ' CENTAVO' : ' CENTAVOS') : String(c).padStart(2, '0') + '/100' + (o.style === 'fraction_centavos' ? ' CENTAVOS' : ''));
   const s = parts.join(' AND ') + ' ONLY';
   return o.case === 'title' ? s.toLowerCase().replace(/(^|[\s-])([a-z])/g, (m, a, b) => a + b.toUpperCase()) : s;
 }
@@ -267,14 +267,14 @@ function fmtDate(iso, fmt) {
 function stdLayout(code) {
   return {
     id: 'std-' + code, name: bankName(code) + ' · standard leaf', bank: code, std: true,
-    // Positions measured from Meatplus Check Set 1 (BDO, Chinabank, BPI leaves, PCHC 8" x 3" standard).
+    // Positions measured from Meatplus Check Sets 1-2 (BDO, Chinabank, BPI, UnionBank, PBB, Security Bank; PCHC 8" x 3" standard).
     checkW: 203.2, checkH: 76.2, paper: 'check', placeX: 0, placeY: 0, nudgeX: 0, nudgeY: 0, bold: false,
     fields: {
       date:   {show: true, x: 152.6, y: 14.9, size: 12, mode: 'boxes', fmt: 'MMMM DD, YYYY', order: 'MDY', spacing: 4.8, groupGap: 2.4, sep: '-'},
       payee:  {show: true, x: 30.3, y: 22.8, size: 12, maxW: 106, stars: false, upper: true},
       amount: {show: true, x: 152.9, y: 22.5, size: 12, stars: false, prefix: ''},
-      words:  {show: true, x: 21.3, y: 30.1, size: 12, maxW: 170, line2: 6, line2X: 8, style: 'centavos', case: 'title', pesoWord: false, hyphen: false, stars: false},
-      memo:   code === 'CBC' ? {show: true, x: 192, y: 40, size: 12, source: 'acct', align: 'right'} : {show: false, x: 12, y: 57, size: 8, source: 'cv', align: 'left'},
+      words:  {show: true, x: 21.3, y: 30.1, size: 12, maxW: 170, line2: 6, line2X: 8, style: code === 'PBB' ? 'fraction_centavos' : 'centavos', case: 'title', pesoWord: false, hyphen: false, stars: false},
+      memo:   code === 'CBC' || code === 'PBB' ? {show: true, x: 192, y: code === 'PBB' ? 41 : 40, size: 12, source: 'acct', align: 'right'} : {show: false, x: 12, y: 57, size: 8, source: 'cv', align: 'left'},
       acPayee:{show: true, x: 92, y: 1.5}
     }
   };
@@ -944,7 +944,7 @@ const FIELD_UI = {
   date: ['Date', [['mode', 'Style', 'sel', [['boxes', 'Digit boxes'], ['text', 'Written']]], ['order', 'Box order', 'sel', [['MDY', 'MM DD YYYY'], ['DMY', 'DD MM YYYY'], ['YMD', 'YYYY MM DD']]], ['spacing', 'Box pitch mm', 'num'], ['groupGap', 'Group gap mm', 'num'], ['sep', 'Separator', 'sel', [['', 'None'], ['-', 'Dash  09-21-2026'], ['/', 'Slash  09/21/2026']]], ['fmt', 'Written format', 'sel', ['MMMM DD, YYYY', 'MMM. DD, YYYY', 'MM/DD/YYYY', 'MM-DD-YYYY', 'DD-MMM-YYYY'].map(v => [v, v])]]],
   payee: ['Payee', [['maxW', 'Max width mm', 'num'], ['stars', '** marks', 'chk'], ['upper', 'UPPERCASE', 'chk']]],
   amount: ['Amount in figures', [['prefix', 'Prefix', 'sel', [['', 'None'], ['PHP', 'PHP'], ['P', 'P']]], ['stars', '** marks', 'chk']]],
-  words: ['Amount in words', [['style', 'Centavos', 'sel', [['centavos', 'And Ninety Two Centavos'], ['fraction', 'And 92/100']]], ['case', 'Letter case', 'sel', [['title', 'Title Case'], ['upper', 'UPPERCASE']]], ['pesoWord', 'Say "Pesos"', 'chk'], ['hyphen', 'Hyphen (Ninety-Two)', 'chk'], ['maxW', 'Line 1 width mm', 'num'], ['line2', 'Line 2 drop mm', 'num'], ['line2X', 'Line 2 x mm', 'num'], ['stars', '** marks', 'chk']]],
+  words: ['Amount in words', [['style', 'Centavos', 'sel', [['centavos', 'And Ninety Two Centavos'], ['fraction', 'And 92/100'], ['fraction_centavos', 'And 92/100 Centavos']]], ['case', 'Letter case', 'sel', [['title', 'Title Case'], ['upper', 'UPPERCASE']]], ['pesoWord', 'Say "Pesos"', 'chk'], ['hyphen', 'Hyphen (Ninety-Two)', 'chk'], ['maxW', 'Line 1 width mm', 'num'], ['line2', 'Line 2 drop mm', 'num'], ['line2X', 'Line 2 x mm', 'num'], ['stars', '** marks', 'chk']]],
   memo: ['Extra line', [['source', 'Prints', 'sel', [['acct', 'Account number'], ['cv', 'CV number'], ['particulars', 'First line of particulars']]], ['align', 'Align', 'sel', [['left', 'Left edge at X'], ['right', 'Right edge at X']]]]],
   acPayee: ['A/C payee crossing', []]
 };
