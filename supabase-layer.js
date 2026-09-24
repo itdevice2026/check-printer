@@ -210,7 +210,7 @@ document.head.insertAdjacentHTML('beforeend', `<style id="cp-pay-css">
 /* ---------- programmer credit (shown on the sign-in screen and in the app) ---------- */
 if (!document.getElementById('cp-credit')) {
   document.head.insertAdjacentHTML('beforeend', '<meta name="author" content="Nomer Sta Ana"><style>#cp-credit{text-align:center;font-size:12px;color:var(--muted);padding:18px 16px 26px;margin-top:24px;border-top:1px solid var(--line)}#cp-credit b{color:var(--ink);font-weight:600}</style>');
-  document.body.insertAdjacentHTML('beforeend', '<footer id="cp-credit">Meatplus Check Printer System \u00b7 Programmer: <b>Nomer Sta Ana</b></footer>');
+  document.body.insertAdjacentHTML('beforeend', '<footer id="cp-credit">System Developed By: <b>Nomer Sta Ana</b></footer>');
 }
 const _renderAll = renderAll;
 renderAll = function (force) {
