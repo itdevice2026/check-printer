@@ -4,6 +4,9 @@
    =================================================================== */
 'use strict';
 const CP_CONFIG = window.CP_CONFIG || {};
+// Per-customer branding (set in config.js > brand). Defaults are neutral.
+const CP_BRAND = Object.assign({appTitle: 'Check Printer', name: 'Check Printer', tagline: '', emailPlaceholder: 'name@company.com', usersHint: 'New people sign in with their company email and password, or press Create account on the sign-in page.'}, CP_CONFIG.brand || {});
+document.title = CP_BRAND.appTitle;
 const SB = window.supabase.createClient(CP_CONFIG.supabaseUrl, CP_CONFIG.supabaseKey, {auth: {persistSession: true, autoRefreshToken: true}});
 let CP_SESSION = null, CP_ROLE = null, CP_USERS = [], CP_CHANNEL = null, CP_PAYEES = [];
 
@@ -137,7 +140,7 @@ function gate(html) {
   if (!g) { g = document.createElement('div'); g.id = 'cp-gate'; document.body.insertBefore(g, document.getElementById('cp-credit')); }
   g.hidden = !html; g.innerHTML = html || ''; $('.app').hidden = !!html;
 }
-const brandHtml = `<div class="brand" style="margin:0 0 6px"><svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect x="1" y="7" width="32" height="20" rx="3" fill="var(--accent)"/><path d="M5 20h11M5 23h7" stroke="var(--accent-ink)" stroke-width="1.6" stroke-linecap="round"/><rect x="21" y="11" width="8" height="5" rx="1" fill="none" stroke="var(--accent-ink)" stroke-width="1.4"/></svg><div><h1>Check Printer</h1><small>Meatplus group of companies</small></div></div>`;
+const brandHtml = `<div class="brand" style="margin:0 0 6px"><svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect x="1" y="7" width="32" height="20" rx="3" fill="var(--accent)"/><path d="M5 20h11M5 23h7" stroke="var(--accent-ink)" stroke-width="1.6" stroke-linecap="round"/><rect x="21" y="11" width="8" height="5" rx="1" fill="none" stroke="var(--accent-ink)" stroke-width="1.4"/></svg><div><h1>${esc(CP_BRAND.name)}</h1>${CP_BRAND.tagline ? `<small>${esc(CP_BRAND.tagline)}</small>` : ''}</div></div>`;
 function showLogin(msg, kind = 'bad') {
   gate(`<form class="card form cp-login" id="cp-login">${brandHtml}
     <p class="muted" style="margin:0">Sign in with your company account. Access is by invitation.</p>
@@ -256,8 +259,8 @@ renderCompanies = function (force) {
     <div class="table-wrap" style="border:0"><table class="t"><thead><tr><th>Email</th><th>Role</th><th></th></tr></thead><tbody>
     ${CP_USERS.slice().sort((a, b) => a.email.localeCompare(b.email)).map(u => `<tr><td>${esc(u.email)}${u.full_name ? `<div class="hint">${esc(u.full_name)}</div>` : ''}${u.active ? '' : ' <span class="st st-Voided">disabled</span>'}</td><td>${u.role === 'admin' ? 'Administrator' : 'User'}</td><td>${isAdmin && u.email !== CP_SESSION?.user?.email ? `<div class="rowacts"><button class="btn sm" data-uact="toggle" data-u="${esc(u.email)}">${u.active ? 'Disable' : 'Enable'}</button><button class="btn sm danger" data-uact="del" data-u="${esc(u.email)}">Remove</button></div>` : ''}</td></tr>`).join('')}
     </tbody></table></div>
-    ${isAdmin ? `<form class="row" id="cp-uadd"><label class="f">Email<input id="cp-uemail" type="email" required placeholder="name@meatplus.ph"></label><label class="f">Name<input id="cp-uname"></label><label class="f">Role<select id="cp-urole"><option value="user">User</option><option value="admin">Administrator</option></select></label><div style="align-self:end"><button class="btn primary">Add user</button></div></form>
-    <p class="hint" style="margin:0">New people sign in with their existing company account for the Meatplus apps, or press Create account on the sign-in page.</p>` : ''}</div>`);
+    ${isAdmin ? `<form class="row" id="cp-uadd"><label class="f">Email<input id="cp-uemail" type="email" required placeholder="${esc(CP_BRAND.emailPlaceholder)}"></label><label class="f">Name<input id="cp-uname"></label><label class="f">Role<select id="cp-urole"><option value="user">User</option><option value="admin">Administrator</option></select></label><div style="align-self:end"><button class="btn primary">Add user</button></div></form>
+    <p class="hint" style="margin:0">${esc(CP_BRAND.usersHint)}</p>` : ''}</div>`);
   if (!isAdmin) return;
   $('#cp-uadd').addEventListener('submit', async e => { e.preventDefault(); try { const row = await must(SB.from('cp_allowed_users').insert({email: $('#cp-uemail').value.trim().toLowerCase(), full_name: $('#cp-uname').value.trim(), role: $('#cp-urole').value}).select().single()); applyRow('cp_allowed_users', row); audit('Added user', row.email + ' (' + row.role + ')'); toast('User added.'); } catch (err) { writeErr(err); } });
   $('#cp-users').addEventListener('click', async e => {
@@ -380,7 +383,7 @@ function renderPayees(force) {
 const _renderTop = renderTop;
 renderTop = function () {
   _renderTop();
-  const chip = $('#store-chip'); chip.className = 'chip cloud'; chip.textContent = 'Online'; chip.title = 'Saved to the Meatplus Supabase database. Everyone on the user list sees changes live.';
+  const chip = $('#store-chip'); chip.className = 'chip cloud'; chip.textContent = 'Online'; chip.title = 'Saved to the online database. Everyone on the user list sees changes live.';
   if (!$('#cp-me')) chip.insertAdjacentHTML('afterend', `<span id="cp-me" class="hint"></span><button class="btn sm" id="cp-out">Sign out</button>`), $('#cp-out').addEventListener('click', () => SB.auth.signOut());
   $('#cp-me').textContent = CP_SESSION?.user?.email || '';
 };
