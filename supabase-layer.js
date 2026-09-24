@@ -151,12 +151,26 @@ function showLogin(msg, kind = 'bad') {
   </form>`);
   const email = () => $('#cp-email').value.trim().toLowerCase(), pass = () => $('#cp-pass').value;
   $('#cp-login').addEventListener('submit', async e => { e.preventDefault(); $('#cp-in').disabled = true; const {error} = await SB.auth.signInWithPassword({email: email(), password: pass()}); if (error) showLogin(error.message === 'Invalid login credentials' ? 'Wrong email or password.' : error.message); });
-  $('#cp-reset').addEventListener('click', async () => { if (!email()) { $('#cp-email').focus(); return; } const {error} = await SB.auth.resetPasswordForEmail(email(), {redirectTo: location.origin + location.pathname}); showLogin(error ? error.message : 'Check your email for a link to set a new password.', error ? 'bad' : 'good'); });
+  $('#cp-reset').addEventListener('click', () => showLogin('Forgot your password? Only your Check Printer administrator can reset it. Ask them for a temporary password, then sign in and choose a new one.', 'info'));
   $('#cp-signup').addEventListener('click', async () => { if (!email() || pass().length < 8) { showLogin('Enter your email and a password of at least 8 characters, then press Create account.', 'warn'); return; } const {data, error} = await SB.auth.signUp({email: email(), password: pass(), options: {emailRedirectTo: location.origin + location.pathname}}); if (error) showLogin(error.message); else if (!data.session) showLogin('Account created. Open the confirmation email, then sign in here.', 'good'); });
 }
-function showNewPassword() {
-  gate(`<form class="card form cp-login" id="cp-np">${brandHtml}<h2>Set a new password</h2><label class="f">New password<input id="cp-np1" type="password" autocomplete="new-password" minlength="8" required></label><div class="actions"><button class="btn primary">Save password</button></div></form>`);
-  $('#cp-np').addEventListener('submit', async e => { e.preventDefault(); const {error} = await SB.auth.updateUser({password: $('#cp-np1').value}); if (error) toast(error.message, 'bad'); else { toast('Password updated.'); start(); } });
+function showNewPassword(forced) {
+  gate(`<form class="card form cp-login" id="cp-np" autocomplete="off">${brandHtml}<h2 style="margin:4px 0 0">Choose a new password</h2>
+    ${forced ? `<div class="msg info">Your administrator reset your password. Choose your own new password to continue.</div>` : ''}
+    <label class="f">New password (at least 8 characters)<input id="cp-np1" type="password" autocomplete="new-password" minlength="8" required></label>
+    <label class="f">Repeat new password<input id="cp-np2" type="password" autocomplete="new-password" minlength="8" required></label>
+    <div id="cp-npmsg"></div>
+    <div class="actions"><button class="btn primary" id="cp-npgo">Save password</button><button type="button" class="btn" id="cp-npout">Sign out</button></div></form>`);
+  $('#cp-npout').addEventListener('click', () => SB.auth.signOut());
+  $('#cp-np').addEventListener('submit', async e => {
+    e.preventDefault(); const p1 = $('#cp-np1').value, p2 = $('#cp-np2').value, m = t => $('#cp-npmsg').innerHTML = `<div class="msg bad">${esc(t)}</div>`;
+    if (p1.length < 8) return m('Use at least 8 characters.'); if (p1 !== p2) return m('The two passwords do not match.');
+    $('#cp-npgo').disabled = true;
+    const {error} = await SB.auth.updateUser({password: p1, data: {cp_must_change: false}});
+    if (error) { $('#cp-npgo').disabled = false; return m(/same|different/i.test(error.message) ? 'Choose a password different from the temporary one.' : error.message); }
+    toast('Password updated.'); CP_STARTED = false; start();
+  });
+  $('#cp-np1').focus();
 }
 function showNoAccess(email) {
   gate(`<div class="card form cp-login">${brandHtml}<div class="msg warn"><b>${esc(email)}</b> is not on the Check Printer user list. Ask the administrator to add you, then reload this page.</div><div class="actions"><button class="btn" id="cp-out2">Sign out</button></div></div>`);
@@ -249,6 +263,39 @@ renderCompanies = function (force) {
   });
 };
 
+/* ---------- password reset by an administrator only ---------- */
+function tempPassword() { const c = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'; const r = crypto.getRandomValues(new Uint32Array(10)); return [...r].map(x => c[x % c.length]).join('').replace(/^(.{5})/, '$1-'); }
+function showPwReset(u) {
+  $('#cp-pwbox')?.remove();
+  $('#cp-users .table-wrap').insertAdjacentHTML('afterend', `<form id="cp-pwbox" class="card form" style="margin:10px 0;border-color:var(--accent)" autocomplete="off">
+    <b>Reset password for ${esc(u.full_name || u.email)}</b><span class="hint">${esc(u.email)}</span>
+    <label class="f">Temporary password<span style="display:flex;gap:8px"><input id="cp-pwv" class="mono" value="${tempPassword()}" minlength="8" autocomplete="off" spellcheck="false"><button type="button" class="btn sm" id="cp-pwgen">New</button></span></label>
+    <label class="inline"><input type="checkbox" id="cp-pwmust" checked> User must choose a new password at next sign-in</label>
+    <div id="cp-pwmsg"></div>
+    <div class="actions"><button class="btn primary" id="cp-pwgo">Set temporary password</button><button type="button" class="btn" id="cp-pwx">Cancel</button></div>
+    <p class="hint" style="margin:0">If this person has no sign-in account yet, one is created with this password. Give the password to them privately.</p></form>`);
+  $('#cp-pwgen').addEventListener('click', () => { $('#cp-pwv').value = tempPassword(); });
+  $('#cp-pwx').addEventListener('click', () => $('#cp-pwbox').remove());
+  $('#cp-pwbox').addEventListener('submit', async e => {
+    e.preventDefault(); const pw = $('#cp-pwv').value.trim(), b = $('#cp-pwgo'), must = $('#cp-pwmust').checked;
+    if (pw.length < 8) { $('#cp-pwmsg').innerHTML = `<div class="msg bad">Use at least 8 characters.</div>`; return; }
+    b.disabled = true; b.textContent = 'Setting…';
+    try {
+      const {data, error} = await SB.functions.invoke('cp-admin-users', {body: {action: 'set_password', email: u.email, password: pw, must_change: must}});
+      if (error) { let msg = error.message; try { msg = (await error.context.json()).error || msg; } catch {} throw new Error(msg); }
+      if (data?.error) throw new Error(data.error);
+      $('#cp-pwbox').innerHTML = `<b>${data.created ? 'Sign-in created' : 'Password reset'} for ${esc(u.email)}</b>
+        <div class="msg ok">Temporary password: <b class="mono" style="font-size:15px;user-select:all">${esc(pw)}</b></div>
+        <p class="hint" style="margin:0">${must ? 'They will be asked to choose a new password when they sign in. ' : ''}Give this password to them privately; it is not shown again.</p>
+        <div class="actions"><button type="button" class="btn" id="cp-pwcopy">Copy password</button><button type="button" class="btn" id="cp-pwdone">Done</button></div>`;
+      $('#cp-pwcopy').addEventListener('click', () => copyText(pw, 'Password copied.'));
+      $('#cp-pwdone').addEventListener('click', () => $('#cp-pwbox').remove());
+      toast(data.created ? 'Sign-in account created.' : 'Password reset.');
+    } catch (err) { $('#cp-pwmsg').innerHTML = `<div class="msg bad">${esc(err.message)}</div>`; b.disabled = false; b.textContent = 'Set temporary password'; }
+  });
+  $('#cp-pwv').focus(); $('#cp-pwv').select();
+}
+
 /* ---------- user management (admins) ---------- */
 const _renderCompanies = renderCompanies;
 renderCompanies = function (force) {
@@ -257,7 +304,7 @@ renderCompanies = function (force) {
   const isAdmin = CP_ROLE === 'admin';
   host.insertAdjacentHTML('beforeend', `<div class="card form" id="cp-users"><div class="sec-head"><h2>Users</h2><span class="hint">${isAdmin ? 'Only people listed here can sign in' : 'Ask an administrator to change this list'}</span></div>
     <div class="table-wrap" style="border:0"><table class="t"><thead><tr><th>Email</th><th>Role</th><th></th></tr></thead><tbody>
-    ${CP_USERS.slice().sort((a, b) => a.email.localeCompare(b.email)).map(u => `<tr><td>${esc(u.email)}${u.full_name ? `<div class="hint">${esc(u.full_name)}</div>` : ''}${u.active ? '' : ' <span class="st st-Voided">disabled</span>'}</td><td>${u.role === 'admin' ? 'Administrator' : 'User'}</td><td>${isAdmin && u.email !== CP_SESSION?.user?.email ? `<div class="rowacts"><button class="btn sm" data-uact="toggle" data-u="${esc(u.email)}">${u.active ? 'Disable' : 'Enable'}</button><button class="btn sm danger" data-uact="del" data-u="${esc(u.email)}">Remove</button></div>` : ''}</td></tr>`).join('')}
+    ${CP_USERS.slice().sort((a, b) => a.email.localeCompare(b.email)).map(u => `<tr><td>${esc(u.email)}${u.full_name ? `<div class="hint">${esc(u.full_name)}</div>` : ''}${u.active ? '' : ' <span class="st st-Voided">disabled</span>'}</td><td>${u.role === 'admin' ? 'Administrator' : 'User'}</td><td>${isAdmin && u.email !== CP_SESSION?.user?.email ? `<div class="rowacts" style="flex-wrap:wrap;justify-content:flex-end"><button class="btn sm" data-uact="pw" data-u="${esc(u.email)}" title="Set a temporary password for this user">Reset password</button><button class="btn sm" data-uact="toggle" data-u="${esc(u.email)}">${u.active ? 'Disable' : 'Enable'}</button><button class="btn sm danger" data-uact="del" data-u="${esc(u.email)}">Remove</button></div>` : ''}</td></tr>`).join('')}
     </tbody></table></div>
     ${isAdmin ? `<form class="row" id="cp-uadd"><label class="f">Email<input id="cp-uemail" type="email" required placeholder="${esc(CP_BRAND.emailPlaceholder)}"></label><label class="f">Name<input id="cp-uname"></label><label class="f">Role<select id="cp-urole"><option value="user">User</option><option value="admin">Administrator</option></select></label><div style="align-self:end"><button class="btn primary">Add user</button></div></form>
     <p class="hint" style="margin:0">${esc(CP_BRAND.usersHint)}</p>` : ''}</div>`);
@@ -265,6 +312,7 @@ renderCompanies = function (force) {
   $('#cp-uadd').addEventListener('submit', async e => { e.preventDefault(); try { const row = await must(SB.from('cp_allowed_users').insert({email: $('#cp-uemail').value.trim().toLowerCase(), full_name: $('#cp-uname').value.trim(), role: $('#cp-urole').value}).select().single()); applyRow('cp_allowed_users', row); audit('Added user', row.email + ' (' + row.role + ')'); toast('User added.'); } catch (err) { writeErr(err); } });
   $('#cp-users').addEventListener('click', async e => {
     const b = e.target.closest('[data-uact]'); if (!b) return; const email = b.dataset.u; const u = CP_USERS.find(x => x.email === email); if (!u) return;
+    if (b.dataset.uact === 'pw') { showPwReset(u); return; }
     try {
       if (b.dataset.uact === 'toggle') { applyRow('cp_allowed_users', await must(SB.from('cp_allowed_users').update({active: !u.active}).eq('email', email).select().single())); audit(u.active ? 'Disabled user' : 'Enabled user', email); }
       else { await must(SB.from('cp_allowed_users').delete().eq('email', email)); applyRow('cp_allowed_users', u, true); audit('Removed user', email); }
@@ -394,6 +442,7 @@ function start() { if (!CP_STARTING) CP_STARTING = startInner().finally(() => { 
 async function startInner() {
   const {data: {session}} = await SB.auth.getSession(); CP_SESSION = session;
   if (!session) { CP_STARTED = false; showLogin(); return; }
+  if (session.user?.user_metadata?.cp_must_change) { CP_STARTED = false; showNewPassword(true); return; }
   gate('<div class="card cp-login"><p class="muted">Loading records…</p></div>');
   try { CP_LIC = await must(SB.rpc('cp_license_status')); } catch { CP_LIC = null; }
   if (CP_LIC && !CP_LIC.licensed) { CP_STARTED = false; showActivate(CP_LIC); return; }
