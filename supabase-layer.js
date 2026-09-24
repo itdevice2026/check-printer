@@ -103,6 +103,12 @@ spoilSubmit = async function (e) {
   try { applyRow('cp_checks', await must(SB.rpc('cp_record_spoiled', {p_account_id: acctId, p_check_no: no, p_reason: reason}))); await refreshRows(); toast(`Leaf ${padNo(a, no)} recorded as voided.`); app.spoiledOpen = false; renderRegister(); }
   catch (err) { writeErr(err); }
 };
+canDelete = function () { return CP_ROLE === 'admin'; };
+deleteCheck = async function (acctId, no, reason) {
+  const r = S.checks[bucketId(acctId, no)]?.checks?.[no]; if (!r) return null;
+  await must(SB.rpc('cp_delete_check', {p_id: r._id, p_reason: reason}));
+  applyRow('cp_checks', {id: r._id}, true); await refreshRows(); return r;
+};
 async function refreshRows() {
   const [cos, acs, au] = await Promise.all([must(SB.from('cp_companies').select('*')), must(SB.from('cp_accounts').select('*')), must(SB.from('cp_audit').select('*').order('at', {ascending: false}).limit(20))]);
   cos.forEach(r => applyRow('cp_companies', r)); acs.forEach(r => applyRow('cp_accounts', r)); au.forEach(r => applyRow('cp_audit', r));
