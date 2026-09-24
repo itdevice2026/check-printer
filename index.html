@@ -610,7 +610,7 @@ const app = {
   acctEdit: null, coEdit: null, importData: null
 };
 function newDraft(keepAcct) {
-  return {accountId: keepAcct || '', no: '', noAuto: true, date: todayISO(), payee: '', amount: '', words: '', wordsManual: false,
+  return {accountId: keepAcct || '', no: '', noAuto: false, date: todayISO(), payee: '', amount: '', words: '', wordsManual: false,
     particulars: '', cvNo: '', cvAuto: true, acPayee: false, entries: [{acct: '', dr: '', cr: ''}, {acct: '', dr: '', cr: ''}], alsoVoucher: true};
 }
 app.draft = newDraft();
@@ -653,11 +653,11 @@ function renderAll(force) {
 function writeData(d, acct) {
   const amount = parseAmt(d.amount);
   return {date: d.date, payee: d.payee.trim(), amount, words: d.words, particulars: d.particulars, cvNo: d.cvNo, acPayee: d.acPayee,
-    noStr: acct ? padNo(acct, +d.no || 0) : '', acctNo: acct?.number || '', acctName: acct?.name || '', branch: acct?.branch || '', brstn: (acct?.brstn || '').replace(/\D/g, ''), acctLabel: acct ? (acct.name || '') + (acct.branch ? ' · ' + acct.branch + ' Branch' : '') : ''};
+    noStr: acct && +d.no ? padNo(acct, +d.no) : '', acctNo: acct?.number || '', acctName: acct?.name || '', branch: acct?.branch || '', brstn: (acct?.brstn || '').replace(/\D/g, ''), acctLabel: acct ? (acct.name || '') + (acct.branch ? ' · ' + acct.branch + ' Branch' : '') : ''};
 }
 function syncDraftAuto() {
   const d = app.draft; const accts = accountList();
-  if (!d.accountId || !accts.find(a => a.id === d.accountId)) { d.accountId = accts.find(a => a.active !== false)?.id || accts[0]?.id || ''; d.noAuto = true; }
+  if (!d.accountId || !accts.find(a => a.id === d.accountId)) { d.accountId = accts.find(a => a.active !== false)?.id || accts[0]?.id || ''; }
   const acct = S.accounts[d.accountId] ? {id: d.accountId, ...S.accounts[d.accountId]} : null;
   if (acct && d.noAuto) d.no = String(acct.nextNo || acct.seriesFrom || 1);
   const co = acct ? S.companies[acct.companyId] : null;
@@ -715,7 +715,7 @@ function renderWrite(force) {
       </div></div>`;
     const d = () => app.draft;
     const bind = (id, key, after) => $(id).addEventListener('input', e => { d()[key] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; after && after(e); updateWrite(); });
-    $('#w-acct').addEventListener('change', e => { d().accountId = e.target.value; d().noAuto = true; updateWrite(true); });
+    $('#w-acct').addEventListener('change', e => { d().accountId = e.target.value; updateWrite(true); });
     bind('#w-no', 'no', () => d().noAuto = false);
     bind('#w-date', 'date'); bind('#w-payee', 'payee'); bind('#w-amt', 'amount');
     $('#w-amt').addEventListener('blur', e => { const v = parseAmt(e.target.value); if (v) { e.target.value = peso(v); d().amount = e.target.value; } });
@@ -771,7 +771,7 @@ function updateWrite(refreshSelect) {
   if (!companyList().length) m.push(['bad', 'Add your company first. <a data-go="companies">Open Companies</a>']);
   else if (!acct) m.push(['bad', 'Add a bank account and its checkbook series. <a data-go="accounts">Open Bank accounts</a>']);
   if (acct) {
-    if (!no) m.push(['bad', 'Enter the check number printed on the leaf.']);
+    if (!no) m.push(['info', `Type the check number printed on the leaf. Next in this checkbook: ${padNo(acct, acct.nextNo || acct.seriesFrom)}.`]);
     else {
       const ex = findCheck(acct.id, no);
       if (ex) m.push(['bad', `Check ${padNo(acct, no)} is already in the register (${effStatus(ex)}, ${esc(ex.payee || 'spoiled')}). Use Register › PDF to reprint it.`]);
@@ -789,7 +789,8 @@ function updateWrite(refreshSelect) {
   if (data.amount >= 1e12) m.push(['bad', 'Amount is too large.']);
   $('#w-msgs').innerHTML = m.map(([k, h]) => `<div class="msg ${k}">${h}</div>`).join('');
   const blocking = m.some(x => x[0] === 'bad');
-  $('#w-issue').disabled = blocking || !data.amount || !data.payee || !d.date;
+  $('#w-issue').disabled = blocking || !data.amount || !data.payee || !d.date || !no;
+  $('#w-no').placeholder = 'Type check no.';
   $('#w-issue').textContent = isPrint() ? 'Issue & print check' : 'Issue check & download PDF';
   $('#w-alsov-lbl').textContent = isPrint() ? ' Also print the check voucher' : ' Also download the check voucher';
   // last issued
