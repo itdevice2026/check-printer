@@ -99,6 +99,8 @@ svg.leaf .pp{font-family:var(--sans);fill:var(--leaf-ink)}
 svg.leaf .edit [data-field]{cursor:grab}
 svg.leaf .sel{fill:#0F6B55}
 svg.leaf .anchor{fill:#E0672B}
+svg.leaf .tag{cursor:grab}svg.leaf .tag rect{fill:#E8F1EE;stroke:#0F6B55;stroke-width:.15}svg.leaf .tag text{fill:#0F6B55;font-family:Arial,sans-serif;font-weight:700}
+svg.leaf .tag.on rect{fill:#0F6B55}svg.leaf .tag.on text{fill:#FFFFFF}
 .notes{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px;margin:10px 0 0;padding-left:18px}
 .msgs{display:flex;flex-direction:column;gap:6px}
 .msg{border-radius:7px;padding:7px 10px;font-size:13px}
@@ -419,11 +421,21 @@ function leafDecor(L, d, W, H, pid) {
   return s;
 }
 let leafSeq = 0;
+// Plain calibration leaf: blank white check with a millimetre grid (no bank artwork), used by Layouts & calibration.
+const FIELD_TAG = {date: 'DATE', amount: 'AMOUNT (FIGURE)', payee: 'PAYEE', words: 'AMOUNT IN WORDS', memo: 'MEMO'};
+function plainLeaf(W, H) {
+  let s = `<rect width="${W}" height="${H}" fill="#FFFFFF"/>`;
+  for (let x = 5; x < W; x += 5) s += `<line x1="${x}" y1="0" x2="${x}" y2="${H}" stroke="${x % 10 ? '#EEF1F4' : '#DCE2E8'}" stroke-width="${x % 50 ? .12 : .25}"/>`;
+  for (let y = 5; y < H; y += 5) s += `<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="${y % 10 ? '#EEF1F4' : '#DCE2E8'}" stroke-width="${y % 50 ? .12 : .25}"/>`;
+  for (let x = 10; x < W; x += 10) s += `<text x="${x}" y="2.4" font-size="1.7" fill="#9AA5B1" text-anchor="middle" font-family="Arial">${x}</text>`;
+  for (let y = 10; y < H; y += 10) s += `<text x="1" y="${y + .6}" font-size="1.7" fill="#9AA5B1" font-family="Arial">${y}</text>`;
+  return s + `<rect x=".15" y=".15" width="${W - .3}" height="${H - .3}" fill="none" stroke="#8A96A3" stroke-width=".3"/>`;
+}
 function leafSVG(L, d, opt = {}) {
   const W = +L.checkW, H = +L.checkH, F = L.fields, k = 0.352778;
   const items = buildItems(L, d, (t, s) => measureCanvas(t, s, L.bold));
   const pid = 'gl' + (++leafSeq);
-  let s = `<svg class="leaf" viewBox="0 0 ${W} ${H}" role="img" aria-label="Check preview">` + leafDecor(L, d, W, H, pid);
+  let s = `<svg class="leaf" viewBox="0 0 ${W} ${H}" role="img" aria-label="Check preview">` + (opt.plain ? plainLeaf(W, H) : leafDecor(L, d, W, H, pid));
   // printed items
   s += `<g class="${opt.editable ? 'edit' : ''}">`;
   for (const it of items) {
@@ -434,7 +446,11 @@ function leafSVG(L, d, opt = {}) {
     }
     s += `<text class="pt${sel}" data-field="${it.field}" x="${it.x}" y="${it.y}" font-size="${(it.size * k).toFixed(3)}" font-weight="${L.bold ? 700 : 400}" ${it.align === 'center' ? 'text-anchor="middle"' : it.align === 'right' ? 'text-anchor="end"' : ''}>${esc(it.text)}</text>`;
   }
-  if (opt.editable) for (const f of ['date','payee','amount','words','memo','acPayee']) if (F[f].show) s += `<circle class="anchor" data-field="${f}" cx="${F[f].x}" cy="${F[f].y}" r="${opt.selected === f ? 1.1 : .7}"/>`;
+  if (opt.editable) for (const f of ['date','payee','amount','words','memo','acPayee']) if (F[f].show) {
+    if (opt.plain && FIELD_TAG[f]) { const tx = f === 'date' ? +F[f].x - +F[f].spacing / 2 : +F[f].x, ty = +F[f].y - (+F[f].size || 12) * k * .72 - 1.1;
+      s += `<g class="tag${opt.selected === f ? ' on' : ''}" data-field="${f}"><rect x="${tx - .3}" y="${ty - 1.75}" width="${FIELD_TAG[f].length * .98 + 1.2}" height="2.3" rx=".5"/><text x="${tx + .3}" y="${ty}" font-size="1.6">${FIELD_TAG[f]}</text></g>`; }
+    s += `<circle class="anchor" data-field="${f}" cx="${F[f].x}" cy="${F[f].y}" r="${opt.selected === f ? 1.1 : .7}"/>`;
+  }
   s += `</g></svg>`;
   return s;
 }
@@ -1136,7 +1152,7 @@ function renderLayouts(force) {
     </div>
     <div class="sticky">
       <div class="leaf-wrap">
-        <div class="leaf-head"><h3>Drag fields onto the leaf</h3><span class="hint mono" id="l-pos"></span></div>
+        <div class="leaf-head"><h3>Drag Date, Amount, Payee and Amount in words</h3><label class="inline" style="font-size:13px"><input type="checkbox" id="l-design" ${app.layoutDesign ? 'checked' : ''}> Show bank design</label><span class="hint mono" id="l-pos"></span></div>
         <div id="l-leaf"></div>
         <ul class="notes"><li>X and Y are millimetres from the top-left corner of the leaf to the start of the text baseline (the centre of the first digit for date boxes).</li><li>Measure a blank leaf from your checkbook with a ruler, set the positions, then download an alignment test, print it on plain paper at 100% and hold it against the leaf in front of a light.</li><li>The standard templates are a starting point based on the common 8" × 3" PCHC leaf. Calibrate each bank before printing live checks.</li></ul>
       </div>
@@ -1154,6 +1170,7 @@ function renderLayouts(force) {
   if (!el._bound) { el._bound = true; el.addEventListener('input', layoutInput); el.addEventListener('change', layoutInput); }
   $('#l-save').addEventListener('click', () => saveLayout(false));
   $('#l-copy').addEventListener('click', () => saveLayout(true));
+  $('#l-design').addEventListener('change', e => { app.layoutDesign = e.target.checked; refreshLayoutPreview(); });
   $('#l-cal').addEventListener('click', () => {
     const D = app.layoutDraft, mx = parseFloat($('#l-mx').value), my = parseFloat($('#l-my').value); let msg = [];
     const cur = v => (isFinite(+v) && +v >= 80 && +v <= 120 ? +v : 100);
@@ -1187,7 +1204,7 @@ function refreshLayoutPreview() {
   const L = app.layoutDraft; if (!$('#l-leaf')) return;
   const u = accountList('ALL').find(a => (a.layoutId || 'std-' + a.bank) === app.layoutId);
   const sd = {...sampleData(L), ...(u ? {acctNo: u.number, acctName: u.name, branch: u.branch, brstn: u.brstn, noStr: padNo(u, u.nextNo)} : {})};
-  $('#l-leaf').innerHTML = leafSVG(L, sd, {editable: true, selected: app.layoutSel});
+  $('#l-leaf').innerHTML = leafSVG(L, sd, {editable: true, selected: app.layoutSel, plain: !app.layoutDesign});
   const F = L.fields[app.layoutSel]; $('#l-pos').textContent = F ? `${app.layoutSel}  x ${r1(+F.x)}  y ${r1(+F.y)} mm` : '';
 }
 let drag = null;
