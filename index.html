@@ -274,12 +274,12 @@ function fmtDate(iso, fmt) {
 /* ---------- layouts ---------- */
 // All positions in millimetres from the top-left corner of the check leaf; y is the text baseline.
 function stdLayout(code) {
-  return {
+  const L = {
     id: 'std-' + code, name: bankName(code) + ' · standard leaf', bank: code, std: true,
     // Positions measured from Meatplus Check Sets 1-2 (BDO, Chinabank, BPI, UnionBank, PBB, Security Bank; PCHC 8" x 3" standard).
     checkW: 203.2, checkH: 76.2, paper: 'check', placeX: 0, placeY: 0, nudgeX: 0, nudgeY: 0, bold: false,
     fields: {
-      date:   {show: true, x: 152.6, y: 14.9, size: 12, mode: 'boxes', fmt: 'MMMM DD, YYYY', order: 'MDY', spacing: 4.8, groupGap: 2.4, sep: '-'},
+      date:   {show: true, x: 150.8, y: 14.2, size: 12, mode: 'boxes', fmt: 'MMMM DD, YYYY', order: 'MDY', spacing: 5.0, groupGap: 2.2, sep: ''},
       payee:  {show: true, x: 30.3, y: 22.8, size: 12, maxW: 106, stars: false, upper: true},
       amount: {show: true, x: 152.9, y: 22.5, size: 12, stars: false, prefix: ''},
       words:  {show: true, x: 21.3, y: 30.1, size: 12, maxW: 170, line2: 6, line2X: 8, style: code === 'PBB' ? 'fraction_centavos' : 'centavos', case: 'title', pesoWord: false, hyphen: false, stars: false},
@@ -287,7 +287,19 @@ function stdLayout(code) {
       acPayee:{show: true, x: 92, y: 1.5}
     }
   };
+  // Date boxes, amount box and (where different) payee / words lines measured per bank from actual check samples (600 dpi scans).
+  // Date digits are centred in each pre-printed box; the dashes between month, day and year are pre-printed, so none is printed.
+  const fit = BANK_FIT[code]; if (fit) for (const f in fit) Object.assign(L.fields[f], fit[f]);
+  return L;
 }
+const BANK_FIT = {
+  BDO:  {date: {x: 151.04, y: 14.2, spacing: 4.99, groupGap: 2.23}, amount: {y: 22.3}},
+  CBC:  {date: {x: 150.59, y: 14.1, spacing: 5.03, groupGap: 2.21}, amount: {y: 21.9}},
+  BPI:  {date: {x: 150.53, y: 15.9, spacing: 5.02, groupGap: 2.19}, amount: {y: 23.5}, payee: {y: 25.45}, words: {y: 32.8}},
+  UBP:  {date: {x: 150.88, y: 15.1, spacing: 5.02, groupGap: 2.25}, amount: {y: 22.9}, payee: {y: 23.85}, words: {y: 31.4}},
+  PBB:  {date: {x: 150.99, y: 13.9, spacing: 5.03, groupGap: 2.18}, amount: {y: 21.7}},
+  SECB: {date: {x: 150.88, y: 14.1, spacing: 5.02, groupGap: 2.25}, amount: {y: 22.0}}
+};
 const STD = Object.fromEntries(BANKS.map(b => ['std-' + b[0], stdLayout(b[0])]));
 function allLayouts() { return {...STD, ...S.layouts}; }
 function getLayout(id) { const L = allLayouts()[id]; if (!L) return clone(STD['std-BDO']); const base = stdLayout(L.bank || 'BDO'); const out = deepMerge(clone(base), clone(L)); out.id = id; return out; }
