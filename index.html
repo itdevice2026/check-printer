@@ -277,7 +277,7 @@ function stdLayout(code) {
   const L = {
     id: 'std-' + code, name: bankName(code) + ' · standard leaf', bank: code, std: true,
     // Positions measured from Meatplus Check Sets 1-2 (BDO, Chinabank, BPI, UnionBank, PBB, Security Bank; PCHC 8" x 3" standard).
-    checkW: 203.2, checkH: 76.2, paper: 'check', placeX: 0, placeY: 0, nudgeX: 0, nudgeY: 0, bold: false,
+    checkW: 203.2, checkH: 76.2, paper: 'check', placeX: 0, placeY: 0, nudgeX: 0, nudgeY: 0, scaleX: 100, scaleY: 100, bold: false,
     fields: {
       date:   {show: true, x: 150.8, y: 14.2, size: 12, mode: 'boxes', fmt: 'MMMM DD, YYYY', order: 'MDY', spacing: 5.0, groupGap: 2.2, sep: ''},
       payee:  {show: true, x: 30.3, y: 22.8, size: 12, maxW: 106, stars: false, upper: true},
@@ -446,17 +446,20 @@ function newCheckDoc(L) {
   if (L.paper === 'check' || !PAPERS[L.paper]) return {doc: new jsPDF({unit: 'mm', format: [+L.checkW, +L.checkH], orientation: +L.checkW > +L.checkH ? 'landscape' : 'portrait'}), ox: +L.nudgeX || 0, oy: +L.nudgeY || 0};
   return {doc: new jsPDF({unit: 'mm', format: PAPERS[L.paper], orientation: 'portrait'}), ox: (+L.placeX || 0) + (+L.nudgeX || 0), oy: (+L.placeY || 0) + (+L.nudgeY || 0)};
 }
+// Printer scale (%): some printer drivers print slightly larger or smaller than 100%, so the date digits drift out of
+// their boxes one by one. Positions (not letter sizes) are pre-scaled from the leaf's top-left corner to cancel it.
+function pScale(L) { const f = v => { v = +v; return isFinite(v) && v >= 80 && v <= 120 ? v / 100 : 1; }; return {sx: f(L.scaleX), sy: f(L.scaleY)}; }
 function drawItems(doc, L, items, ox, oy) {
-  doc.setTextColor(0); doc.setDrawColor(0);
+  doc.setTextColor(0); doc.setDrawColor(0); const {sx, sy} = pScale(L);
   for (const it of items) {
     if (it.type === 'crossing') {
-      const x = ox + it.x, y = oy + it.y; doc.setLineWidth(0.35);
+      const x = ox + it.x * sx, y = oy + it.y * sy; doc.setLineWidth(0.35);
       doc.line(x, y + 17, x + 17, y); doc.line(x + 6, y + 17, x + 23, y);
       doc.setFont('helvetica', 'bold'); doc.setFontSize(6.5); doc.text('A/C PAYEE ONLY', x + 6.3, y + 13.9, {angle: 45});
       continue;
     }
     doc.setFont('helvetica', L.bold ? 'bold' : 'normal'); doc.setFontSize(it.size);
-    doc.text(it.text, ox + it.x, oy + it.y, it.align === 'center' || it.align === 'right' ? {align: it.align} : undefined);
+    doc.text(it.text, ox + it.x * sx, oy + it.y * sy, it.align === 'center' || it.align === 'right' ? {align: it.align} : undefined);
   }
 }
 function checkPdf(L, d, test = false) {
@@ -473,6 +476,15 @@ function checkPdf(L, d, test = false) {
       doc.text(`${f} (${r1(+F.x)}, ${r1(+F.y)})`, x + 1.2, y + 3.2);
     }
     doc.setTextColor(90); doc.text(`ALIGNMENT TEST · ${L.name} · print at 100% (Actual size) and hold against a blank check leaf`, ox + 3, oy + +L.checkH - 2.5);
+    // Calibration rulers: 180 mm across and 50 mm down, drawn with the current printer scale.
+    const {sx, sy} = pScale(L), rx = 10, ry = +L.checkH - 12, lx = 4, ly = 12;
+    doc.setDrawColor(0); doc.setLineWidth(0.25); doc.setTextColor(0);
+    doc.line(ox + rx * sx, oy + ry * sy, ox + (rx + 180) * sx, oy + ry * sy);
+    for (let k = 0; k <= 180; k += 5) { const x = ox + (rx + k) * sx; doc.line(x, oy + ry * sy, x, oy + ry * sy - (k % 10 ? 1.2 : 2.4)); if (k % 30 === 0) doc.text(String(k), x, oy + ry * sy - 3, {align: 'center'}); }
+    doc.text(`X RULER: measure 0 to 180 = ______ mm   (scale X now ${r1(sx * 100)}%)`, ox + (rx + 50) * sx, oy + ry * sy + 3.2);
+    doc.line(ox + lx * sx, oy + ly * sy, ox + lx * sx, oy + (ly + 50) * sy);
+    for (let k = 0; k <= 50; k += 5) { const y = oy + (ly + k) * sy; doc.line(ox + lx * sx, y, ox + lx * sx + (k % 10 ? 1.2 : 2.4), y); }
+    doc.text(`Y: 0 to 50 = ____ mm (scale Y ${r1(sy * 100)}%)`, ox + (lx + 3) * sx, oy + (ly + 50) * sy, {angle: 90});
   }
   drawItems(doc, L, items, ox, oy);
   return doc.output('blob');
@@ -1107,7 +1119,14 @@ function renderLayouts(force) {
           ${inp('paper', 'PDF page', 'sel', [['check', 'Check size'], ['letter', 'Letter 8.5×11'], ['a4', 'A4'], ['long', 'Long 8.5×13']])}
           ${L.paper !== 'check' ? inp('placeX', 'Leaf left mm', 'num') + inp('placeY', 'Leaf top mm', 'num') : ''}
           ${inp('nudgeX', 'Printer shift X', 'num')}${inp('nudgeY', 'Printer shift Y', 'num')}
+          ${inp('scaleX', 'Printer scale X %', 'num')}${inp('scaleY', 'Printer scale Y %', 'num')}
         </div>
+        <div class="mini" style="align-items:end">
+          <label class="f">Ruler X measured mm<input type="number" step="0.1" id="l-mx" placeholder="180.0"></label>
+          <label class="f">Ruler Y measured mm<input type="number" step="0.1" id="l-my" placeholder="50.0"></label>
+          <button class="btn" id="l-cal" type="button">Apply ruler</button>
+        </div>
+        <p class="hint" style="margin:0">If the date digits drift out of their boxes one after another (or the amount runs long or short), the printer is scaling the print. Print the <b>Alignment test PDF</b> at Actual size, measure the X ruler from 0 to 180 and the Y ruler from 0 to 50 with a ruler, type the numbers above and click <b>Apply ruler</b>, then Save layout.</p>
         ${inp('bold', 'Bold print', 'chk')}
         <p class="hint" style="margin:0">Printer shift moves everything at once. Positive X moves right, positive Y moves down. Measure the error on a test print with a ruler and enter it here.</p>
       </div>
@@ -1135,6 +1154,14 @@ function renderLayouts(force) {
   if (!el._bound) { el._bound = true; el.addEventListener('input', layoutInput); el.addEventListener('change', layoutInput); }
   $('#l-save').addEventListener('click', () => saveLayout(false));
   $('#l-copy').addEventListener('click', () => saveLayout(true));
+  $('#l-cal').addEventListener('click', () => {
+    const D = app.layoutDraft, mx = parseFloat($('#l-mx').value), my = parseFloat($('#l-my').value); let msg = [];
+    const cur = v => (isFinite(+v) && +v >= 80 && +v <= 120 ? +v : 100);
+    if (isFinite(mx) && mx > 150 && mx < 210) { D.scaleX = Math.round(cur(D.scaleX) * 180 / mx * 100) / 100; msg.push('scale X ' + D.scaleX + '%'); }
+    if (isFinite(my) && my > 40 && my < 60) { D.scaleY = Math.round(cur(D.scaleY) * 50 / my * 100) / 100; msg.push('scale Y ' + D.scaleY + '%'); }
+    if (!msg.length) { $('#l-msg').innerHTML = `<div class="msg warn">Type what the X ruler (about 180 mm) and/or the Y ruler (about 50 mm) measured on the printed test.</div>`; return; }
+    app.layoutDirty = true; renderLayouts(true); $('#l-msg').innerHTML = `<div class="msg ok">Set ${msg.join(' and ')}. Click Save layout, then print the alignment test again to confirm.</div>`;
+  });
   $('#l-test').addEventListener('click', () => saveFile(`Alignment-test-${L.bank}.pdf`, checkPdf(app.layoutDraft, sampleData(app.layoutDraft), true)));
   $('#l-sample').addEventListener('click', () => saveFile(`Sample-check-${L.bank}.pdf`, checkPdf(app.layoutDraft, sampleData(app.layoutDraft), false)));
   $('#l-reset')?.addEventListener('click', () => {
