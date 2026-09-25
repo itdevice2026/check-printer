@@ -343,7 +343,9 @@ function buildItems(L, d, measure) {
     const f = F.words; const t = f.stars ? '**' + d.words + '**' : d.words;
     let s = +f.size, lines;
     const fitLines = sz => { const first = wrap(t, sz, +f.maxW, measure); if (first.length < 2) return first; const rest = first.slice(1).join(' '); const w2 = +f.maxW + (+f.x - +f.line2X); return [first[0], ...wrap(rest, sz, w2, measure)]; };
-    lines = fitLines(s); while (lines.length > 2 && s > 6) { s -= 0.5; lines = fitLines(s); }
+    // Amount in words is ALWAYS one line: shrink the letters until the whole text fits the line (never wrap).
+    while (s > 5 && measure(t, s) > +f.maxW) s -= 0.25;
+    lines = [t];
     add('words', +f.x, +f.y, s, lines[0]);
     if (lines[1]) add('words', +f.line2X, +f.y + +f.line2, s, lines.slice(1).join(' '));
   }
