@@ -279,7 +279,7 @@ function stdLayout(code) {
   const L = {
     id: 'std-' + code, name: bankName(code) + ' · standard leaf', bank: code, std: true,
     // Positions measured from Meatplus Check Sets 1-2 (BDO, Chinabank, BPI, UnionBank, PBB, Security Bank; PCHC 8" x 3" standard).
-    checkW: 203.2, checkH: 76.2, paper: 'check', placeX: 0, placeY: 0, nudgeX: 0, nudgeY: 0, scaleX: 100, scaleY: 100, bold: false,
+    checkW: 203.2, checkH: 76.2, paper: 'check', placeX: 0, placeY: 0, nudgeX: 0, nudgeY: 0, scaleX: 100, scaleY: 100, bold: true, font: 'helvetica', heavy: false,
     fields: {
       date:   {show: true, x: 150.8, y: 14.2, size: 12, mode: 'boxes', fmt: 'MMMM DD, YYYY', order: 'MDY', spacing: 5.0, groupGap: 2.2, sep: ''},
       payee:  {show: true, x: 30.3, y: 22.8, size: 12, maxW: 106, stars: false, upper: true},
@@ -306,9 +306,12 @@ const STD = Object.fromEntries(BANKS.map(b => ['std-' + b[0], stdLayout(b[0])]))
 function allLayouts() { return {...STD, ...S.layouts}; }
 function getLayout(id) { const L = allLayouts()[id]; if (!L) return clone(STD['std-BDO']); const base = stdLayout(L.bank || 'BDO'); const out = deepMerge(clone(base), clone(L)); out.id = id; return out; }
 
-function measureCanvas(t, size, bold) {
+// Print fonts: the three PDF built-in families (no font download needed). [jsPDF name, screen CSS family]
+const PFONT = {helvetica: ['helvetica', 'Helvetica, Arial, sans-serif'], courier: ['courier', '"Courier New", Courier, monospace'], times: ['times', '"Times New Roman", Times, serif']};
+const pf = L => PFONT[L.font] || PFONT.helvetica;
+function measureCanvas(t, size, bold, font) {
   const ctx = measureCanvas.ctx || (measureCanvas.ctx = document.createElement('canvas').getContext('2d'));
-  ctx.font = (bold ? 'bold ' : '') + '100px Helvetica, Arial, sans-serif';
+  ctx.font = (bold ? 'bold ' : '') + '100px ' + (PFONT[font] || PFONT.helvetica)[1];
   return ctx.measureText(t).width * (size * 0.352778 / 100);
 }
 function wrap(text, size, maxW, measure) {
@@ -433,7 +436,7 @@ function plainLeaf(W, H) {
 }
 function leafSVG(L, d, opt = {}) {
   const W = +L.checkW, H = +L.checkH, F = L.fields, k = 0.352778;
-  const items = buildItems(L, d, (t, s) => measureCanvas(t, s, L.bold));
+  const items = buildItems(L, d, (t, s) => measureCanvas(t, s, L.bold, L.font));
   const pid = 'gl' + (++leafSeq);
   let s = `<svg class="leaf" viewBox="0 0 ${W} ${H}" role="img" aria-label="Check preview">` + (opt.plain ? plainLeaf(W, H) : leafDecor(L, d, W, H, pid));
   // printed items
@@ -444,7 +447,7 @@ function leafSVG(L, d, opt = {}) {
       s += `<g data-field="acPayee" class="${sel}"><rect x="${it.x}" y="${it.y}" width="24" height="18" fill="transparent"/><line x1="${it.x}" y1="${it.y + 17}" x2="${it.x + 17}" y2="${it.y}" stroke="var(--print)" stroke-width=".35"/><line x1="${it.x + 6}" y1="${it.y + 17}" x2="${it.x + 23}" y2="${it.y}" stroke="var(--print)" stroke-width=".35"/><text class="pt${sel}" transform="translate(${it.x + 6.3} ${it.y + 13.9}) rotate(-45)" font-size="${6.5 * k}" font-weight="700">A/C PAYEE ONLY</text></g>`;
       continue;
     }
-    s += `<text class="pt${sel}" data-field="${it.field}" x="${it.x}" y="${it.y}" font-size="${(it.size * k).toFixed(3)}" font-weight="${L.bold ? 700 : 400}" ${it.align === 'center' ? 'text-anchor="middle"' : it.align === 'right' ? 'text-anchor="end"' : ''}>${esc(it.text)}</text>`;
+    s += `<text class="pt${sel}" data-field="${it.field}" x="${it.x}" y="${it.y}" font-size="${(it.size * k).toFixed(3)}" font-weight="${L.bold ? 700 : 400}" style="font-family:${pf(L)[1].replace(/"/g, "'")}${L.heavy ? ';stroke:currentColor;stroke-width:.07' : ''}" ${it.align === 'center' ? 'text-anchor="middle"' : it.align === 'right' ? 'text-anchor="end"' : ''}>${esc(it.text)}</text>`;
   }
   if (opt.editable) for (const f of ['date','payee','amount','words','memo','acPayee']) if (F[f].show) {
     if (opt.plain && FIELD_TAG[f]) { const tx = f === 'date' ? +F[f].x - +F[f].spacing / 2 : +F[f].x, ty = +F[f].y - (+F[f].size || 12) * k * .72 - 1.1;
@@ -474,13 +477,15 @@ function drawItems(doc, L, items, ox, oy) {
       doc.setFont('helvetica', 'bold'); doc.setFontSize(6.5); doc.text('A/C PAYEE ONLY', x + 6.3, y + 13.9, {angle: 45});
       continue;
     }
-    doc.setFont('helvetica', L.bold ? 'bold' : 'normal'); doc.setFontSize(it.size);
-    doc.text(it.text, ox + it.x * sx, oy + it.y * sy, it.align === 'center' || it.align === 'right' ? {align: it.align} : undefined);
+    doc.setFont(pf(L)[0], L.bold ? 'bold' : 'normal'); doc.setFontSize(it.size);
+    // Extra dark: outline each letter as well as filling it, so thin strokes don't break up on a dot-matrix printer.
+    const o = {}; if (it.align === 'center' || it.align === 'right') o.align = it.align; if (L.heavy) { doc.setLineWidth(0.07); doc.setDrawColor(0); o.renderingMode = 'fillThenStroke'; }
+    doc.text(it.text, ox + it.x * sx, oy + it.y * sy, o);
   }
 }
 function checkPdf(L, d, test = false) {
   const {doc, ox, oy} = newCheckDoc(L);
-  const measure = (t, s) => { doc.setFont('helvetica', L.bold ? 'bold' : 'normal'); doc.setFontSize(s); return doc.getTextWidth(t); };
+  const measure = (t, s) => { doc.setFont(pf(L)[0], L.bold ? 'bold' : 'normal'); doc.setFontSize(s); return doc.getTextWidth(t); };
   const items = buildItems(L, d, measure);
   if (test) {
     doc.setDrawColor(120); doc.setLineWidth(0.2); doc.setLineDashPattern([1.2, 1], 0);
@@ -1143,7 +1148,9 @@ function renderLayouts(force) {
           <button class="btn" id="l-cal" type="button">Apply ruler</button>
         </div>
         <p class="hint" style="margin:0">If the date digits drift out of their boxes one after another (or the amount runs long or short), the printer is scaling the print. Print the <b>Alignment test PDF</b> at Actual size, measure the X ruler from 0 to 180 and the Y ruler from 0 to 50 with a ruler, type the numbers above and click <b>Apply ruler</b>, then Save layout.</p>
-        ${inp('bold', 'Bold print', 'chk')}
+        <div class="mini" style="align-items:end">${inp('font', 'Print font', 'sel', [['helvetica', 'Helvetica (clean)'], ['courier', 'Courier (typewriter)'], ['times', 'Times (serif)']])}
+          <div class="actions" style="margin:0">${inp('bold', 'Bold print', 'chk')}${inp('heavy', 'Extra dark (dot-matrix)', 'chk')}</div></div>
+        <p class="hint" style="margin:0">For a dot-matrix printer (Epson LX-310) keep <b>Bold print</b> on. If letters still look thin or broken, tick <b>Extra dark</b> or try Courier, and set the printer's Print Quality to High (not Draft).</p>
         <p class="hint" style="margin:0">Printer shift moves everything at once. Positive X moves right, positive Y moves down. Measure the error on a test print with a ruler and enter it here.</p>
       </div>
       ${Object.entries(FIELD_UI).map(([f, [label, extra]]) => `<div class="fgroup ${app.layoutSel === f ? 'on' : ''}" data-fg="${f}"><header><b>${label}</b>${inp(`fields.${f}.show`, 'Print', 'chk')}</header>
