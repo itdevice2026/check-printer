@@ -598,6 +598,9 @@ const ME = {id: null, name: ''};
 const BUCKET = 200;
 const bucketId = (acctId, no) => acctId + '~' + Math.floor(no / BUCKET);
 function padNo(acct, no) { return String(no).padStart(acct?.digits || 10, '0'); }
+// Digit count of a check number typed with leading zeros (e.g. 0000123456 -> 10), or 0 when it says nothing new.
+function typedDigits(no, acct) { const t = String(no || '').trim().replace(/\D/g, ''); return t.length > 1 && t.length <= 20 && (t[0] === '0' || t.length > (+acct?.digits || 10)) && t.length !== +acct?.digits ? t.length : 0; }
+function lastCheckNo(acctId) { let m = 0; for (const c of allChecks()) if (c.accountId === acctId && c.no > m) m = c.no; return m; }
 let _checksCache = null, _checksSrc = null;
 function allChecks() {
   if (_checksSrc === S.checks) return _checksCache;
@@ -712,7 +715,7 @@ function renderAll(force) {
 function writeData(d, acct) {
   const amount = parseAmt(d.amount);
   return {date: d.date, payee: d.payee.trim(), amount, words: d.words, particulars: d.particulars, cvNo: d.cvNo, acPayee: d.acPayee,
-    noStr: acct && +d.no ? padNo(acct, +d.no) : '', acctNo: acct?.number || '', acctName: acct?.name || '', branch: acct?.branch || '', brstn: (acct?.brstn || '').replace(/\D/g, ''), acctLabel: acct ? (acct.name || '') + (acct.branch ? ' · ' + acct.branch + ' Branch' : '') : ''};
+    noStr: acct && +d.no ? padNo({digits: typedDigits(d.no, acct) || acct.digits}, +d.no) : '', acctNo: acct?.number || '', acctName: acct?.name || '', branch: acct?.branch || '', brstn: (acct?.brstn || '').replace(/\D/g, ''), acctLabel: acct ? (acct.name || '') + (acct.branch ? ' · ' + acct.branch + ' Branch' : '') : ''};
 }
 function syncDraftAuto() {
   const d = app.draft; const accts = accountList();
@@ -818,7 +821,7 @@ function updateWrite(refreshSelect) {
   if (d.noAuto && document.activeElement !== $('#w-no')) $('#w-no').value = d.no;
   if (d.cvAuto && document.activeElement !== $('#w-cv')) $('#w-cv').value = d.cvNo;
   if (!d.wordsManual) $('#w-words').value = d.words;
-  $('#w-series').textContent = acct ? `Series ${padNo(acct, acct.seriesFrom)}–${padNo(acct, acct.seriesTo)}` : '';
+  { const last = acct ? lastCheckNo(acct.id) : 0; $('#w-series').textContent = last ? `Last check no. ${padNo(acct, last)}` : ''; }
   const lay = L || getLayout('std-BDO');
   $('#w-layname').textContent = lay.name;
   const data = writeData(d, acct);
@@ -828,15 +831,12 @@ function updateWrite(refreshSelect) {
   // messages
   const m = []; const no = parseInt(d.no, 10);
   if (!companyList().length) m.push(['bad', 'Add your company first. <a data-go="companies">Open Companies</a>']);
-  else if (!acct) m.push(['bad', 'Add a bank account and its checkbook series. <a data-go="accounts">Open Bank accounts</a>']);
+  else if (!acct) m.push(['bad', 'Add a bank account first. <a data-go="accounts">Open Bank accounts</a>']);
   if (acct) {
-    if (!no) m.push(['warn', `<b>Check number is required.</b> Type the number printed on the leaf. Next in this checkbook: ${padNo(acct, acct.nextNo || acct.seriesFrom)}.`]);
+    if (!no) m.push(['warn', `<b>Check number is required.</b> Type the number printed on the leaf.${lastCheckNo(acct.id) ? ` Last check no. used: ${padNo(acct, lastCheckNo(acct.id))}.` : ''}`]);
     else {
       const ex = findCheck(acct.id, no);
       if (ex) m.push(['bad', `Check ${padNo(acct, no)} is already in the register (${effStatus(ex)}, ${esc(ex.payee || 'spoiled')}). Use Register › PDF to reprint it.`]);
-      if (acct.seriesFrom && acct.seriesTo && (no < +acct.seriesFrom || no > +acct.seriesTo)) m.push(['warn', `Check no. is outside this checkbook's series.`]);
-      const left = +acct.seriesTo - Math.max(no, +acct.nextNo || 0) + 1;
-      if (acct.seriesTo && left > 0 && left <= 10) m.push(['warn', `${left} leaf${left > 1 ? 'ves' : ''} left in this checkbook. Order a new one soon.`]);
     }
     if (acct.active === false) m.push(['warn', 'This account is marked inactive.']);
   }
@@ -884,7 +884,8 @@ async function issueCheck() {
   try {
     const b = bucketId(acct.id, no);
     await patch('checks', b, {accountId: acct.id, checks: {[no]: rec}});
-    if (no >= (+acct.nextNo || 0)) await patch('accounts', acct.id, {nextNo: no + 1});
+    const dg = typedDigits(d.no, acct);
+    if (no >= (+acct.nextNo || 0) || (dg && dg !== +acct.digits)) await patch('accounts', acct.id, {nextNo: Math.max(no + 1, +acct.nextNo || 0), ...(dg ? {digits: dg} : {})});
     if (d.cvAuto && co) await patch('companies', acct.companyId, {cvNext: (+co.cvNext || 1) + 1});
     audit('Issued', `${bankName(acct.bank)} ${acct.number || ''} #${padNo(acct, no)} · ${rec.payee} · ₱${peso(rec.amount)}`);
   } catch (e) { writeErr(e); btn.disabled = false; return; }
@@ -937,7 +938,7 @@ function renderRegister() {
       <div id="r-spoilbox"></div>
       <div class="table-wrap"><table class="t"><thead><tr><th>Check no.</th><th>Date</th><th>Payee</th><th class="r">Amount</th><th>Account</th><th>CV no.</th><th>Status</th><th></th></tr></thead><tbody id="r-body"></tbody></table></div>
       <div class="section"><div class="sec-head"><h2>Summary by bank account</h2><span class="hint">Uses the company, date and search filters above</span></div>
-      <div class="table-wrap"><table class="t"><thead><tr><th>Account</th><th>Company</th><th>Leaves left</th><th class="r">Checks</th><th class="r">Outstanding</th><th class="r">Cleared</th><th class="r">Voided</th></tr></thead><tbody id="r-sum"></tbody></table></div></div>`;
+      <div class="table-wrap"><table class="t"><thead><tr><th>Account</th><th>Company</th><th>Last check no.</th><th class="r">Checks</th><th class="r">Outstanding</th><th class="r">Cleared</th><th class="r">Voided</th></tr></thead><tbody id="r-sum"></tbody></table></div></div>`;
     const f = app.reg;
     $('#r-acct').addEventListener('change', e => { f.account = e.target.value; renderRegister(); });
     $('#r-st').addEventListener('change', e => { f.status = e.target.value; renderRegister(); });
@@ -983,9 +984,9 @@ function renderRegister() {
   const df = $('[data-delform]'); if (df) { df.addEventListener('submit', delSubmit); $('#del-reason').focus(); }
   // summary
   $('#r-sum').innerHTML = accts.map(a => {
-    const rs = rows.filter(r => r.accountId === a.id); const left = Math.max(0, (+a.seriesTo || 0) - (+a.nextNo || 0) + 1); const tot = (+a.seriesTo - +a.seriesFrom + 1) || 1;
+    const rs = rows.filter(r => r.accountId === a.id); const last = lastCheckNo(a.id);
     const sum = l => peso(l.reduce((s, r) => s + (r.amount || 0), 0));
-    return `<tr><td>${esc(acctLabel(a))}</td><td>${esc(coName(a.companyId))}</td><td><span class="mono">${left}</span><div class="meter ${left <= 10 ? 'low' : ''}"><i style="width:${Math.min(100, left / tot * 100)}%"></i></div></td><td class="r mono">${rs.length}</td><td class="r mono">${sum(rs.filter(r => !['Cleared','Voided'].includes(effStatus(r))))}</td><td class="r mono">${sum(rs.filter(r => r.status === 'Cleared'))}</td><td class="r mono">${rs.filter(r => r.status === 'Voided').length}</td></tr>`;
+    return `<tr><td>${esc(acctLabel(a))}</td><td>${esc(coName(a.companyId))}</td><td class="mono">${last ? padNo(a, last) : '—'}</td><td class="r mono">${rs.length}</td><td class="r mono">${sum(rs.filter(r => !['Cleared','Voided'].includes(effStatus(r))))}</td><td class="r mono">${sum(rs.filter(r => r.status === 'Cleared'))}</td><td class="r mono">${rs.filter(r => r.status === 'Voided').length}</td></tr>`;
   }).join('') || `<tr><td colspan="7" class="empty">No bank accounts yet.</td></tr>`;
 }
 async function regAction(e) {
@@ -1082,21 +1083,19 @@ function renderAccounts(force = true) {
       <label class="f">Branch<input id="a-branch" value="${esc(ed.branch)}" placeholder="e.g. Magalang"></label></div>
       <label class="f">Account name<input id="a-name" value="${esc(ed.name)}" placeholder="As printed on the check"></label>
       <div class="row"><label class="f">Account number<input id="a-number" class="mono" value="${esc(ed.number)}"></label><label class="f">BRSTN<input id="a-brstn" class="mono" value="${esc(ed.brstn || '')}" placeholder="From the check, top right"></label></div>
-      <div class="row"><label class="f">Series from<input id="a-from" class="mono" inputmode="numeric" value="${esc(ed.seriesFromStr ?? ed.seriesFrom)}" placeholder="0000100001"></label>
-      <label class="f">Series to<input id="a-to" class="mono" inputmode="numeric" value="${esc(ed.seriesToStr ?? ed.seriesTo)}"></label>
-      <label class="f">Next check no.<input id="a-next" class="mono" inputmode="numeric" value="${esc(ed.nextNo)}"></label></div>
+      <label class="f">Digits in check no.<input id="a-digits" class="mono" type="number" min="1" max="20" step="1" value="${esc(ed.digits || 10)}" style="max-width:120px"></label>
       <label class="f">Print layout<select id="a-layout">${layOpts(ed.layoutId || 'std-' + ed.bank)}</select></label>
       <label class="inline"><input type="checkbox" id="a-active" ${ed.active !== false ? 'checked' : ''}> Active</label>
-      <p class="hint" style="margin:0">Enter the series with leading zeros exactly as printed (e.g. 0000100001). The number of digits is used when printing and in the register. When you receive a new checkbook, update the series and next check no.</p>
+      <p class="hint" style="margin:0">The check number is typed on each check in Write check. Digits in check no. is how many digits the bank prints, counting leading zeros (0000100001 has 10). It is set automatically when a check number is typed with leading zeros.</p>
       <div class="actions"><button class="btn primary">Save account</button><button type="button" class="btn" id="a-cancel">Cancel</button>${ed.id ? `<button type="button" class="btn danger" id="a-del">Delete</button>` : ''}</div>
       <div id="a-delbox"></div>
-    </form>` : `<div class="card form"><h2>Bank accounts</h2><p class="muted" style="margin:0">Each account holds its checkbook series, the next check number and the print layout calibrated for that bank's leaf.</p>
+    </form>` : `<div class="card form"><h2>Bank accounts</h2><p class="muted" style="margin:0">Each account holds the bank details and the print layout calibrated for that bank's leaf. The check number is typed on each check.</p>
       ${cos.length ? `<div class="actions"><button class="btn primary" id="a-new">Add bank account</button></div>` : `<div class="msg warn">Add a company first. <a data-go="companies">Open Companies</a></div>`}</div>`}
     </div>
-    <div class="table-wrap"><table class="t"><thead><tr><th>Bank / account</th><th>Company</th><th>Series</th><th>Next no.</th><th>Layout</th><th></th></tr></thead><tbody>
-    ${accts.map(a => `<tr><td><b>${esc(bankName(a.bank))}</b>${a.active === false ? ' <span class="st st-Post-dated">inactive</span>' : ''}<div class="hint mono">${esc(a.number || '')}${a.branch ? ' · ' + esc(a.branch) : ''}</div><div class="hint">${esc(a.name || '')}</div></td><td>${esc(coName(a.companyId))}</td><td class="mono">${padNo(a, a.seriesFrom)}<br>${padNo(a, a.seriesTo)}</td><td class="mono">${padNo(a, a.nextNo)}</td><td>${esc(allLayouts()[a.layoutId]?.name || 'Standard')}</td><td><button class="btn sm" data-aedit="${a.id}">Edit</button></td></tr>`).join('') || `<tr><td colspan="6" class="empty">No bank accounts${app.company !== 'ALL' ? ' for this company' : ''} yet.</td></tr>`}
+    <div class="table-wrap"><table class="t"><thead><tr><th>Bank / account</th><th>Company</th><th>Last check no.</th><th>Layout</th><th></th></tr></thead><tbody>
+    ${accts.map(a => `<tr><td><b>${esc(bankName(a.bank))}</b>${a.active === false ? ' <span class="st st-Post-dated">inactive</span>' : ''}<div class="hint mono">${esc(a.number || '')}${a.branch ? ' · ' + esc(a.branch) : ''}</div><div class="hint">${esc(a.name || '')}</div></td><td>${esc(coName(a.companyId))}</td><td class="mono">${lastCheckNo(a.id) ? padNo(a, lastCheckNo(a.id)) : '—'}</td><td>${esc(allLayouts()[a.layoutId]?.name || 'Standard')}</td><td><button class="btn sm" data-aedit="${a.id}">Edit</button></td></tr>`).join('') || `<tr><td colspan="6" class="empty">No bank accounts${app.company !== 'ALL' ? ' for this company' : ''} yet.</td></tr>`}
     </tbody></table></div></div>`;
-  $('#a-new')?.addEventListener('click', () => { app.acctEdit = {companyId: app.company !== 'ALL' ? app.company : cos[0]?.id, bank: 'BDO', branch: '', name: S.companies[app.company]?.name || '', number: '', seriesFrom: '', seriesTo: '', nextNo: '', active: true}; renderAccounts(); });
+  $('#a-new')?.addEventListener('click', () => { app.acctEdit = {companyId: app.company !== 'ALL' ? app.company : cos[0]?.id, bank: 'BDO', branch: '', name: S.companies[app.company]?.name || '', number: '', seriesFrom: 0, seriesTo: 0, nextNo: 0, digits: 10, active: true}; renderAccounts(); });
   $$('[data-aedit]').forEach(b => b.addEventListener('click', () => { const a = S.accounts[b.dataset.aedit]; app.acctEdit = {...clone(a), id: b.dataset.aedit, seriesFromStr: padNo(a, a.seriesFrom), seriesToStr: padNo(a, a.seriesTo)}; renderAccounts(); window.scrollTo({top: 0}); }));
   $('#a-cancel')?.addEventListener('click', () => { app.acctEdit = null; renderAccounts(); });
   $('#a-bank')?.addEventListener('change', e => { const sel = $('#a-layout'); if (sel.value.startsWith('std-')) sel.value = S.layouts['std-' + e.target.value] || STD['std-' + e.target.value] ? 'std-' + e.target.value : sel.value; });
@@ -1107,11 +1106,9 @@ function renderAccounts(force = true) {
   });
   $('#a-form')?.addEventListener('submit', async e => {
     e.preventDefault();
-    const fromS = $('#a-from').value.trim(), toS = $('#a-to').value.trim();
-    const from = parseInt(fromS, 10), to = parseInt(toS, 10); let next = parseInt($('#a-next').value, 10) || from;
-    if (!from || !to || to < from) { toast('Enter a valid checkbook series (from ≤ to).', 'warn'); return; }
+    const digits = Math.min(20, Math.max(1, parseInt($('#a-digits').value, 10) || 10));
     const data = {companyId: $('#a-co').value, bank: $('#a-bank').value, branch: $('#a-branch').value.trim(), name: $('#a-name').value.trim(), number: $('#a-number').value.trim(), brstn: $('#a-brstn').value.trim(),
-      seriesFrom: from, seriesTo: to, nextNo: next, digits: Math.max(fromS.length, toS.length, 1), layoutId: $('#a-layout').value, active: $('#a-active').checked};
+      seriesFrom: +ed.seriesFrom || 0, seriesTo: +ed.seriesTo || 0, nextNo: +ed.nextNo || 0, digits, layoutId: $('#a-layout').value, active: $('#a-active').checked};
     const id = ed.id || 'a' + uid();
     try { await put('accounts', id, data); audit(ed.id ? 'Updated account' : 'Added account', acctLabel(data)); toast('Bank account saved.'); app.acctEdit = null; renderAccounts(); } catch (err) { writeErr(err); }
   });

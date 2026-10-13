@@ -91,6 +91,8 @@ issueCheck = async function () {
       p_entries: d.entries.filter(x => x.acct || x.dr || x.cr).map(x => ({acct: x.acct, dr: parseAmt(x.dr), cr: parseAmt(x.cr)}))}));
   } catch (e) { writeErr(e); btn.disabled = false; return; }
   applyRow('cp_checks', row);
+  const dg = typedDigits(d.no, acct); // keep the leading zeros the user typed for this account's check numbers
+  if (dg) { try { await must(SB.from('cp_accounts').update({digits: dg}).eq('id', acct.id)); acct.digits = dg; } catch (e) { console.error(e); } }
   await refreshRows();
   app.last = {accountId: acct.id, no};
   const alsoV = d.alsoVoucher;
