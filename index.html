@@ -514,13 +514,19 @@ function checkPdf(L, d, test = false) {
   drawItems(doc, L, items, ox, oy);
   return doc.output('blob');
 }
+// Check voucher details typed on Write check, stored with the check.
+const PAY_TYPES = ['AP', 'CHK', 'PO', 'CA', 'Reimbursement', 'Others'];
+function voucherOf(d) { const v = {supplierCode: d.supCode, supplierAddress: d.supAddr, supplierTin: d.supTin, payType: d.payType, refNo: d.refNo, apvNo: d.apvNo}; for (const k in v) { v[k] = String(v[k] || '').trim(); if (!v[k]) delete v[k]; } return v; }
+// Fill supplier code, address and TIN from the saved payee until the user types their own.
+function supplierFromPayee(d) { if (!d.supAuto) return; const p = payeeInfo(d.payee) || {}; d.supCode = p.code || ''; d.supAddr = p.address || ''; d.supTin = p.tin || ''; }
 // Lookups the online edition fills in: payee master (address, TIN) and a user's display name.
 function payeeInfo(name) { return null; }
 function userName(idOrEmail) { return idOrEmail || ''; }
 // Check voucher (A4), laid out like the company's accounting-system voucher.
 function voucherPdf(rec) {
   const {jsPDF} = window.jspdf; const doc = new jsPDF({unit: 'mm', format: 'a4'});
-  const co = S.companies[rec.companyId] || {}, acct = S.accounts[rec.accountId] || {}, pay = payeeInfo(rec.payee) || {};
+  const co = S.companies[rec.companyId] || {}, acct = S.accounts[rec.accountId] || {}, pm = payeeInfo(rec.payee) || {}, v = rec.voucher || {};
+  const pay = {code: v.supplierCode || pm.code, address: v.supplierAddress || pm.address, tin: v.supplierTin || pm.tin};
   const M = 12, R = 210 - M, W = R - M;
   const T = (t, x, yy, o = {}) => { doc.setFont('helvetica', o.i ? 'italic' : o.b ? 'bold' : 'normal'); doc.setFontSize(o.s || 8.5); doc.setTextColor(o.c ?? 0); doc.text(t ?? '', x, yy, o.a ? {align: o.a} : undefined); };
   const wrap = (t, w, sz = 8.5) => { doc.setFont('helvetica', 'normal'); doc.setFontSize(sz); return doc.splitTextToSize(String(t ?? ''), w); };
@@ -546,7 +552,7 @@ function voucherPdf(rec) {
   box([['Check #:', rec.noStr || ''], ['Bank:', [bankName(acct.bank), acct.name, acct.number].filter(Boolean).join(' - ')], ['Branch:', acct.branch || ''], ['Check Amount:', peso(rec.amount)]]);
   // payment details
   T('PAYMENT DETAILS:', M, y + 2, {b: 1}); y += 6.5;
-  const pc = [['Date', fmtDate(rec.date, 'MM/DD/YYYY')], ['Type', rec.payType || 'CHK'], ['Reference No.', rec.refNo || ''], ['APV No.', rec.apvNo || ''], ['Paid Amount', peso(rec.amount)]];
+  const pc = [['Date', fmtDate(rec.date, 'MM/DD/YYYY')], ['Type', v.payType || ''], ['Reference No.', v.refNo || ''], ['APV No.', v.apvNo || ''], ['Paid Amount', peso(rec.amount)]];
   const cw = (W - 4 * 3) / 5;
   pc.forEach(([k, v], i) => { const x = M + i * (cw + 3); T(k, x, y, {b: 1, s: 7.5}); doc.rect(x, y + 1.5, cw, 5.5); T(wrap(v, cw - 3)[0] || '', x + 1.5, y + 5.3); });
   y += 13;
@@ -689,7 +695,7 @@ const app = {
 };
 function newDraft(keepAcct) {
   return {accountId: keepAcct || '', no: '', noAuto: false, date: todayISO(), payee: '', amount: '', words: '', wordsManual: false,
-    particulars: '', cvNo: '', cvAuto: true, acPayee: false, entries: [{acct: '', dr: '', cr: ''}, {acct: '', dr: '', cr: ''}], alsoVoucher: true};
+    particulars: '', cvNo: '', cvAuto: true, acPayee: false, supCode: '', supAddr: '', supTin: '', supAuto: true, payType: 'AP', refNo: '', apvNo: '', entries: [{acct: '', dr: '', cr: ''}, {acct: '', dr: '', cr: ''}], alsoVoucher: true};
 }
 app.draft = newDraft();
 
@@ -772,6 +778,15 @@ function renderWrite(force) {
           <label class="inline" style="align-self:end;padding-bottom:8px"><input type="checkbox" id="w-ac"> Cross: A/C PAYEE ONLY</label>
         </div>
         <label class="f">Particulars (voucher)<span class="clr-wrap ta"><textarea id="w-part" rows="3" placeholder="e.g. Payment for Invoice #1234, delivery of frozen pork cuts"></textarea><button type="button" class="clr" data-clear="particulars" aria-label="Clear particulars" title="Clear">×</button></span></label>
+        <details id="w-vd" open><summary>Check voucher details</summary>
+          <div class="form" style="margin-top:8px">
+            <div class="row"><label class="f">Supplier code<input id="w-scode" maxlength="40"></label><label class="f">Supplier TIN<input id="w-stin" class="mono" maxlength="30" placeholder="000-000-000-000"></label></div>
+            <label class="f">Supplier address<input id="w-saddr" maxlength="300"></label>
+            <div class="row"><label class="f">Payment type<input id="w-ptype" list="w-ptypes" maxlength="30"><datalist id="w-ptypes">${PAY_TYPES.map(t => `<option value="${t}">`).join('')}</datalist></label>
+              <label class="f">Reference no.<input id="w-ref" maxlength="60" placeholder="e.g. Invoice / SI no."></label><label class="f">APV no.<input id="w-apv" maxlength="60"></label></div>
+            <p class="hint" style="margin:0">Supplier code, address and TIN fill in from the saved payee. Anything you type here is saved back to the payee when the check is issued.</p>
+          </div>
+        </details>
         <details id="w-ent"><summary>Accounting entries on the voucher</summary>
           <table class="entries"><tbody id="w-ent-body"></tbody></table>
           <div class="actions" style="margin-top:6px"><button type="button" class="btn sm" id="w-ent-add">Add line</button><span class="hint" id="w-ent-tot"></span></div>
@@ -800,7 +815,9 @@ function renderWrite(force) {
     const bind = (id, key, after) => $(id).addEventListener('input', e => { d()[key] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; after && after(e); updateWrite(); });
     $('#w-acct').addEventListener('change', e => { d().accountId = e.target.value; updateWrite(true); });
     bind('#w-no', 'no', () => d().noAuto = false);
-    bind('#w-date', 'date'); bind('#w-payee', 'payee'); bind('#w-amt', 'amount');
+    bind('#w-date', 'date'); bind('#w-payee', 'payee', () => { supplierFromPayee(d()); fillSupplier(); }); bind('#w-amt', 'amount');
+    for (const [id, k] of [['#w-scode', 'supCode'], ['#w-saddr', 'supAddr'], ['#w-stin', 'supTin']]) bind(id, k, () => d().supAuto = false);
+    bind('#w-ptype', 'payType'); bind('#w-ref', 'refNo'); bind('#w-apv', 'apvNo');
     $('#w-amt').addEventListener('blur', e => { const v = parseAmt(e.target.value); if (v) { e.target.value = peso(v); d().amount = e.target.value; } });
     bind('#w-words', 'words'); bind('#w-cv', 'cvNo', () => d().cvAuto = false); bind('#w-ac', 'acPayee'); bind('#w-part', 'particulars'); bind('#w-alsov', 'alsoVoucher');
     $('#w-wm').addEventListener('change', e => { d().wordsManual = e.target.checked; $('#w-words').readOnly = !e.target.checked; updateWrite(); });
@@ -821,8 +838,10 @@ function fillWriteInputs() {
   $('#w-no').value = d.no; $('#w-date').value = d.date; $('#w-payee').value = d.payee; $('#w-amt').value = d.amount;
   $('#w-words').value = d.words; $('#w-wm').checked = d.wordsManual; $('#w-words').readOnly = !d.wordsManual;
   $('#w-cv').value = d.cvNo; $('#w-ac').checked = d.acPayee; $('#w-part').value = d.particulars; $('#w-alsov').checked = d.alsoVoucher;
+  supplierFromPayee(d); fillSupplier(); $('#w-ptype').value = d.payType || ''; $('#w-ref').value = d.refNo || ''; $('#w-apv').value = d.apvNo || '';
   renderEntries();
 }
+function fillSupplier() { const d = app.draft; $('#w-scode').value = d.supCode || ''; $('#w-saddr').value = d.supAddr || ''; $('#w-stin').value = d.supTin || ''; }
 function renderEntries() {
   $('#w-ent-body').innerHTML = app.draft.entries.map((e, i) => `<tr><td><input data-i="${i}" data-k="acct" value="${esc(e.acct)}" placeholder="Account title" aria-label="Account title"></td><td><input data-i="${i}" data-k="dr" class="mono" value="${esc(e.dr)}" placeholder="Debit" inputmode="decimal" aria-label="Debit"></td><td><input data-i="${i}" data-k="cr" class="mono" value="${esc(e.cr)}" placeholder="Credit" inputmode="decimal" aria-label="Credit"></td><td><button type="button" class="btn sm" data-del="${i}" aria-label="Remove line">×</button></td></tr>`).join('');
   entTotals();
@@ -900,7 +919,7 @@ async function issueCheck() {
   if (findCheck(acct.id, no)) { toast('That check number is already used.', 'bad'); return; }
   const rec = {date: d.date, payee: data.payee, amount: data.amount, words: d.words, particulars: d.particulars.trim(), cvNo: d.cvNo.trim(),
     acPayee: !!d.acPayee, entries: d.entries.filter(x => x.acct || x.dr || x.cr).map(x => ({acct: x.acct, dr: parseAmt(x.dr), cr: parseAmt(x.cr)})),
-    status: 'Issued', companyId: acct.companyId, createdAt: new Date().toISOString(), createdBy: ME.id || '', createdByName: ME.name || '', printed: 1};
+    voucher: voucherOf(d), status: 'Issued', companyId: acct.companyId, createdAt: new Date().toISOString(), createdBy: ME.id || '', createdByName: ME.name || '', printed: 1};
   const btn = $('#w-issue'); btn.disabled = true;
   try {
     const b = bucketId(acct.id, no);
@@ -1095,7 +1114,7 @@ async function delSubmit(e) {
   toast(`Check ${padNo(a, no)} deleted from the register.`);
   if (!reissue) { renderRegister(); return; }
   const d = newDraft(acctId);
-  Object.assign(d, {no: String(no), noAuto: false, date: r.date || todayISO(), payee: r.payee || '', amount: r.amount ? peso(r.amount) : '', particulars: r.particulars || '', cvNo: r.cvNo || '', cvAuto: !r.cvNo, acPayee: !!r.acPayee, alsoVoucher: app.draft.alsoVoucher});
+  Object.assign(d, {no: String(no), noAuto: false, date: r.date || todayISO(), payee: r.payee || '', amount: r.amount ? peso(r.amount) : '', particulars: r.particulars || '', cvNo: r.cvNo || '', cvAuto: !r.cvNo, acPayee: !!r.acPayee, alsoVoucher: app.draft.alsoVoucher, ...(r.voucher ? {supCode: r.voucher.supplierCode || '', supAddr: r.voucher.supplierAddress || '', supTin: r.voucher.supplierTin || '', supAuto: false, payType: r.voucher.payType || 'AP', refNo: r.voucher.refNo || '', apvNo: r.voucher.apvNo || ''} : {})});
   if (r.entries?.length) d.entries = r.entries.map(x => ({acct: x.acct || '', dr: x.dr ? String(x.dr) : '', cr: x.cr ? String(x.cr) : ''}));
   if (app.company !== 'ALL' && app.company !== r.companyId) { app.company = 'ALL'; lsSet('mtc-co', 'ALL'); }
   app.draft = d; app.last = null; go('write');

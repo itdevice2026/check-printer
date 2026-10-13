@@ -15,7 +15,7 @@ const coFromRow = r => ({name: r.name, short: r.short, tin: r.tin, address: r.ad
 const coToRow = (id, c) => ({id, name: c.name, short: c.short || '', tin: c.tin || '', address: c.address || '', cv_prefix: c.cvPrefix || 'CV', cv_next: +c.cvNext || 1, prepared: c.prepared || '', checked: c.checked || '', approved: c.approved || ''});
 const acFromRow = r => ({companyId: r.company_id, bank: r.bank, branch: r.branch, name: r.name, number: r.number, brstn: r.brstn, seriesFrom: +r.series_from, seriesTo: +r.series_to, nextNo: +r.next_no, digits: r.digits, layoutId: r.layout_id, active: r.active});
 const acToRow = (id, a) => ({id, company_id: a.companyId, bank: a.bank, branch: a.branch || '', name: a.name || '', number: a.number || '', brstn: a.brstn || '', series_from: +a.seriesFrom, series_to: +a.seriesTo, next_no: +a.nextNo, digits: +a.digits || 10, layout_id: a.layoutId || '', active: a.active !== false});
-const ckFromRow = r => ({_id: r.id, date: r.check_date, payee: r.payee, amount: Number(r.amount), words: r.words, particulars: r.particulars, cvNo: r.cv_no, acPayee: r.ac_payee, entries: r.entries || [], status: r.status, voidReason: r.void_reason || '', printed: r.printed, companyId: r.company_id, createdAt: r.created_at, createdBy: r.created_by, createdByName: r.created_by_email, releasedAt: r.released_at, clearedAt: r.cleared_at, voidedAt: r.voided_at});
+const ckFromRow = r => ({_id: r.id, date: r.check_date, payee: r.payee, amount: Number(r.amount), words: r.words, particulars: r.particulars, cvNo: r.cv_no, acPayee: r.ac_payee, entries: r.entries || [], voucher: r.voucher || {}, status: r.status, voidReason: r.void_reason || '', printed: r.printed, companyId: r.company_id, createdAt: r.created_at, createdBy: r.created_by, createdByName: r.created_by_email, releasedAt: r.released_at, clearedAt: r.cleared_at, voidedAt: r.voided_at});
 const CK_FIELDS = {status: 'status', releasedAt: 'released_at', clearedAt: 'cleared_at', voidReason: 'void_reason', voidedAt: 'voided_at', printed: 'printed', particulars: 'particulars', cvNo: 'cv_no'};
 
 function applyRow(table, row, deleted) {
@@ -90,10 +90,18 @@ issueCheck = async function () {
       p_words: d.words, p_particulars: d.particulars.trim(), p_cv_no: d.cvNo.trim(), p_cv_auto: !!d.cvAuto, p_ac_payee: !!d.acPayee,
       p_entries: d.entries.filter(x => x.acct || x.dr || x.cr).map(x => ({acct: x.acct, dr: parseAmt(x.dr), cr: parseAmt(x.cr)}))}));
   } catch (e) { writeErr(e); btn.disabled = false; return; }
+  // voucher details: store with the check, and keep new supplier details on the saved payee
+  const vd = voucherOf(d);
+  if (Object.keys(vd).length) {
+    try { row = await must(SB.from('cp_checks').update({voucher: vd}).eq('id', row.id).select().single()); } catch (e) { console.error(e); toast('Check saved, but the voucher details could not be stored: ' + e.message, 'warn'); }
+  }
   applyRow('cp_checks', row);
   const dg = typedDigits(d.no, acct); // keep the leading zeros the user typed for this account's check numbers
   if (dg) { try { await must(SB.from('cp_accounts').update({digits: dg}).eq('id', acct.id)); acct.digits = dg; } catch (e) { console.error(e); } }
   await refreshRows();
+  const pm = findPayee(row.payee), upd = {};
+  if (pm) { if (vd.supplierCode && vd.supplierCode !== pm.code) upd.code = vd.supplierCode; if (vd.supplierAddress && vd.supplierAddress !== pm.address) upd.address = vd.supplierAddress; if (vd.supplierTin && vd.supplierTin !== pm.tin) upd.tin = vd.supplierTin; }
+  if (pm && Object.keys(upd).length) { try { applyRow('cp_payees', await must(SB.from('cp_payees').update(upd).eq('id', pm.id).select().single())); } catch (e) { console.error(e); } }
   app.last = {accountId: acct.id, no};
   const alsoV = d.alsoVoucher;
   app.draft = newDraft(acct.id); app.draft.alsoVoucher = alsoV; app.draft.date = d.date;
@@ -330,7 +338,7 @@ renderCompanies = function (force) {
 const payKey = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
 const findPayee = name => { const k = payKey(name); return k ? CP_PAYEES.find(p => payKey(p.name) === k) : null; };
 async function addPayee(v) {
-  const row = {name: String(v.name || '').trim().replace(/\s+/g, ' '), tin: (v.tin || '').trim() || null};
+  const row = {name: String(v.name || '').trim().replace(/\s+/g, ' '), tin: (v.tin || '').trim() || null, code: (v.code || '').trim() || null, address: (v.address || '').trim() || null};
   if (!row.name) throw new Error('Enter the payee name.');
   if (findPayee(row.name)) { const e = new Error('That payee is already saved.'); e.code = '23505'; throw e; }
   try { const r = await must(SB.from('cp_payees').insert(row).select().single()); applyRow('cp_payees', r); audit('Added payee', row.name); return r; }
@@ -398,7 +406,9 @@ function renderPayees(force) {
   el.innerHTML = `<div class="split" id="cp-payees">
     <form id="cp-padd" class="card form" autocomplete="off"><div class="sec-head"><h2>${ed ? 'Edit payee' : 'Add payee'}</h2></div>
       <label class="f">Payee name (as printed on the check)<input id="cp-pname" required maxlength="120" value="${esc(ed?.name || '')}" placeholder="e.g. ABC Meat Supply Inc."></label>
-      <label class="f">TIN (optional)<input id="cp-ptin" maxlength="30" value="${esc(ed?.tin || '')}" placeholder="000-000-000-000"></label>
+      <div class="row"><label class="f">Supplier code (optional)<input id="cp-pcode" maxlength="40" value="${esc(ed?.code || '')}"></label>
+      <label class="f">TIN (optional)<input id="cp-ptin" maxlength="30" value="${esc(ed?.tin || '')}" placeholder="000-000-000-000"></label></div>
+      <label class="f">Address (optional, prints on the check voucher)<input id="cp-paddr" maxlength="300" value="${esc(ed?.address || '')}"></label>
       <div class="actions"><button class="btn primary" type="submit">${ed ? 'Save changes' : 'Add payee'}</button>${ed ? '<button class="btn" type="button" id="cp-pcancel">Cancel</button>' : ''}</div>
       <p class="hint" style="margin:0">Payees are also saved automatically each time a check is issued. Saved payees appear as choices in the Payee field of Write check.</p>
     </form>
@@ -409,12 +419,12 @@ function renderPayees(force) {
   $('#cp-pcancel')?.addEventListener('click', () => { cpPayEdit = null; renderPayees(true); });
   $('#cp-padd').addEventListener('submit', async e => {
     e.preventDefault(); const btn = e.submitter; if (btn) btn.disabled = true;
-    const v = {name: $('#cp-pname').value, tin: $('#cp-ptin').value};
+    const v = {name: $('#cp-pname').value, tin: $('#cp-ptin').value, code: $('#cp-pcode').value, address: $('#cp-paddr').value};
     try {
       if (ed) {
         const name = v.name.trim().replace(/\s+/g, ' '); if (!name) throw new Error('Enter the payee name.');
         const dup = findPayee(name); if (dup && dup.id !== ed.id) throw new Error('Another saved payee already has that name.');
-        const r = await must(SB.from('cp_payees').update({name, tin: v.tin.trim() || null}).eq('id', ed.id).select().single());
+        const r = await must(SB.from('cp_payees').update({name, tin: v.tin.trim() || null, code: v.code.trim() || null, address: v.address.trim() || null}).eq('id', ed.id).select().single());
         applyRow('cp_payees', r); audit('Updated payee', name); toast('Payee updated.'); cpPayEdit = null;
       } else { await addPayee(v); toast('Payee added.'); }
       renderPayees(true); $('#cp-pname')?.focus();
