@@ -693,6 +693,9 @@ const isPrint = () => app.outMode === 'print';
 
 const mounted = {};
 function renderAll(force) {
+  // Layouts & calibration is for administrators only: hide the tab and leave it if a user lands there.
+  const lt = $('.tabs [data-tab="layouts"]'); if (lt) lt.hidden = !canEditLayouts();
+  if (app.tab === 'layouts' && !canEditLayouts()) { app.tab = 'write'; $('#tab-layouts').innerHTML = ''; mounted.layouts = false; }
   renderTop();
   const t = app.tab;
   if (t === 'write') renderWrite(force);
