@@ -532,10 +532,11 @@ function voucherPdf(rec) {
   const wrap = (t, w, sz = 8.5) => { doc.setFont('helvetica', 'normal'); doc.setFontSize(sz); return doc.splitTextToSize(String(t ?? ''), w); };
   doc.setDrawColor(0); doc.setLineWidth(0.3);
   // header
-  let y = 21;
-  T(co.name || 'Company', M, y, {b: 1, s: 11}); y += 3.6;
-  if (co.address) { const a = wrap(co.address, 105, 7); T(a, M, y, {s: 7}); y += 2.9 * a.length; }
-  if (co.tin) { T('VAT Reg. TIN ' + co.tin, M, y, {s: 7}); y += 2.9; }
+  let y = 21, tx = M;
+  if (co.logo) { try { const pr = doc.getImageProperties(co.logo); const lh = 17, lw = Math.min(26, lh * pr.width / pr.height); doc.addImage(co.logo, pr.fileType || 'JPEG', M, 12, lw, lw * pr.height / pr.width); tx = M + lw + 3; } catch (e) { console.error(e); } }
+  T(co.name || 'Company', tx, y, {b: 1, s: 11}); y += 3.6;
+  if (co.address) { const a = wrap(co.address, 92 - (tx - M), 7); T(a, tx, y, {s: 7}); y += 2.9 * a.length; }
+  if (co.tin) { T('VAT Reg. TIN ' + co.tin, tx, y, {s: 7}); y += 2.9; }
   T('CHECK VOUCHER', 124, 22, {b: 1, s: 13, a: 'center'});
   doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); const cvv = rec.cvNo || '—', dtv = fmtDate(rec.date, 'MM/DD/YYYY');
   T(cvv, R, 20, {a: 'right'}); T('CV No.: ', R - doc.getTextWidth(cvv) - 0.5, 20, {b: 1, a: 'right'}); doc.setFont('helvetica', 'normal');
@@ -1353,6 +1354,17 @@ async function saveLayout(asCopy) {
 }
 
 /* ---------- COMPANIES, BACKUP & AUDIT ---------- */
+// Shrink an uploaded logo to at most 400 px so it stores small and prints sharp on the voucher.
+function logoDataUrl(file) {
+  return new Promise((ok, bad) => {
+    if (!/^image\//.test(file.type)) return bad(new Error('Choose a PNG or JPG image.'));
+    const img = new Image(), u = URL.createObjectURL(file);
+    img.onload = () => { URL.revokeObjectURL(u); const k = Math.min(1, 400 / Math.max(img.width, img.height)); const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height); ok(c.toDataURL('image/jpeg', 0.92)); };
+    img.onerror = () => { URL.revokeObjectURL(u); bad(new Error('That file could not be read as an image.')); };
+    img.src = u;
+  });
+}
 let profileNames = {};
 function renderCompanies(force = true) {
   if (!force && (app.coEdit && $('#c-form') || app.importData)) return;
@@ -1364,6 +1376,10 @@ function renderCompanies(force = true) {
       <label class="f">Registered name<input id="c-name" required value="${esc(ed.name)}"></label>
       <div class="row"><label class="f">Short name<input id="c-short" value="${esc(ed.short)}" placeholder="e.g. MTC"></label><label class="f">TIN<input id="c-tin" class="mono" value="${esc(ed.tin)}" placeholder="000-000-000-000"></label></div>
       <label class="f">Address<textarea id="c-addr" rows="2">${esc(ed.address)}</textarea></label>
+      <div class="f"><span>Logo (prints on the check voucher)</span><div class="actions" style="margin:0;align-items:center">
+        <span id="c-logo-prev" style="display:inline-flex;align-items:center;justify-content:center;width:72px;height:54px;border:1px solid var(--line);border-radius:6px;background:#fff">${ed.logo ? `<img src="${ed.logo}" alt="Company logo" style="max-width:68px;max-height:50px">` : '<span class="hint">None</span>'}</span>
+        <label class="btn sm" for="c-logo">${ed.logo ? 'Change logo' : 'Upload logo'}</label><input type="file" id="c-logo" accept="image/png,image/jpeg,image/webp" hidden>
+        ${ed.logo ? '<button type="button" class="btn sm" id="c-logo-x">Remove</button>' : ''}</div></div>
       <div class="row"><label class="f">CV prefix<input id="c-cvp" value="${esc(ed.cvPrefix || 'CV')}"></label><label class="f">Next CV no.<input id="c-cvn" class="mono" inputmode="numeric" value="${esc(ed.cvNext || 1)}"></label></div>
       <h3>Voucher signatories</h3>
       <div class="row"><label class="f">Prepared by<input id="c-prep" value="${esc(ed.prepared)}"></label><label class="f">Checked by<input id="c-chk" value="${esc(ed.checked)}"></label><label class="f">Approved by<input id="c-appr" value="${esc(ed.approved)}"></label></div>
@@ -1385,9 +1401,15 @@ function renderCompanies(force = true) {
   $('#c-new')?.addEventListener('click', () => { app.coEdit = {name: '', short: '', tin: '', address: '', cvPrefix: 'CV', cvNext: 1}; renderCompanies(); });
   $$('[data-cedit]').forEach(b => b.addEventListener('click', () => { app.coEdit = {...clone(S.companies[b.dataset.cedit]), id: b.dataset.cedit}; renderCompanies(); }));
   $('#c-cancel')?.addEventListener('click', () => { app.coEdit = null; renderCompanies(); });
+  const keepForm = () => { for (const [k, i] of [['name', '#c-name'], ['short', '#c-short'], ['tin', '#c-tin'], ['address', '#c-addr'], ['cvPrefix', '#c-cvp'], ['cvNext', '#c-cvn'], ['prepared', '#c-prep'], ['checked', '#c-chk'], ['approved', '#c-appr']]) ed[k] = $(i).value; };
+  $('#c-logo')?.addEventListener('change', async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try { const url = await logoDataUrl(f); keepForm(); ed.logo = url; renderCompanies(); toast('Logo ready. Click Save company to keep it.'); } catch (err) { toast(err.message, 'warn'); }
+  });
+  $('#c-logo-x')?.addEventListener('click', () => { keepForm(); ed.logo = ''; renderCompanies(); });
   $('#c-form')?.addEventListener('submit', async e => {
     e.preventDefault(); const id = ed.id || 'c' + uid();
-    const data = {...(ed.id ? clone(S.companies[ed.id]) : {}), name: $('#c-name').value.trim(), short: $('#c-short').value.trim(), tin: $('#c-tin').value.trim(), address: $('#c-addr').value.trim(), cvPrefix: $('#c-cvp').value.trim() || 'CV', cvNext: parseInt($('#c-cvn').value, 10) || 1, prepared: $('#c-prep').value.trim(), checked: $('#c-chk').value.trim(), approved: $('#c-appr').value.trim()};
+    const data = {...(ed.id ? clone(S.companies[ed.id]) : {}), name: $('#c-name').value.trim(), short: $('#c-short').value.trim(), tin: $('#c-tin').value.trim(), address: $('#c-addr').value.trim(), cvPrefix: $('#c-cvp').value.trim() || 'CV', cvNext: parseInt($('#c-cvn').value, 10) || 1, prepared: $('#c-prep').value.trim(), checked: $('#c-chk').value.trim(), approved: $('#c-appr').value.trim(), logo: ed.logo || ''};
     if (!data.name) return;
     try { await put('companies', id, data); audit(ed.id ? 'Updated company' : 'Added company', data.name); toast('Company saved.'); app.coEdit = null; renderCompanies(); } catch (err) { writeErr(err); }
   });
