@@ -106,6 +106,7 @@ svg.leaf .tag.on rect{fill:#0F6B55}svg.leaf .tag.on text{fill:#FFFFFF}
 .msg{border-radius:7px;padding:7px 10px;font-size:13px}
 .msg.bad{background:var(--bad-soft);color:var(--bad)}
 .msg.warn{background:var(--warn-soft);color:var(--warn)}
+tr.sel td{background:var(--bad-soft)}
 .split.locked input:disabled,.split.locked select:disabled{opacity:.75;cursor:not-allowed}
 .msg.info{background:var(--info-soft);color:var(--info)}
 .msg.good{background:var(--good-soft);color:var(--good)}
@@ -663,6 +664,7 @@ const app = {
   company: lsGet('mtc-co', 'ALL'), tab: 'write', outMode: lsGet('mtc-out', 'print'),
   draft: null, last: null, voidOpen: null, spoiledOpen: false,
   reg: {account: 'ALL', status: 'ALL', from: '', to: '', q: ''},
+  regSel: new Set(), bulkOpen: false,
   layoutId: null, layoutDraft: null, layoutDirty: false, layoutSel: 'payee',
   acctEdit: null, coEdit: null, importData: null
 };
@@ -934,8 +936,9 @@ function renderRegister() {
         <label class="f">Search<input id="r-q" placeholder="Payee, check no., CV no."></label>
       </div>
       <div class="tiles" id="r-tiles"></div>
-      <div class="sec-head" style="margin-bottom:10px"><h2>Check register</h2><div class="actions"><button class="btn" id="r-spoil">Record spoiled leaf</button><button class="btn primary" id="r-xlsx">Export to Excel</button></div></div>
+      <div class="sec-head" style="margin-bottom:10px"><h2>Check register</h2><div class="actions"><span id="r-bulk" class="actions" style="margin:0"></span><button class="btn" id="r-spoil">Record spoiled leaf</button><button class="btn primary" id="r-xlsx">Export to Excel</button></div></div>
       <div id="r-spoilbox"></div>
+      <div id="r-bulkbox"></div>
       <div class="table-wrap"><table class="t"><thead><tr><th>Check no.</th><th>Date</th><th>Payee</th><th class="r">Amount</th><th>Account</th><th>CV no.</th><th>Status</th><th></th></tr></thead><tbody id="r-body"></tbody></table></div>
       <div class="section"><div class="sec-head"><h2>Summary by bank account</h2><span class="hint">Uses the company, date and search filters above</span></div>
       <div class="table-wrap"><table class="t"><thead><tr><th>Account</th><th>Company</th><th>Last check no.</th><th class="r">Checks</th><th class="r">Outstanding</th><th class="r">Cleared</th><th class="r">Voided</th></tr></thead><tbody id="r-sum"></tbody></table></div></div>`;
@@ -948,6 +951,10 @@ function renderRegister() {
     $('#r-xlsx').addEventListener('click', exportXlsx);
     $('#r-spoil').addEventListener('click', () => { app.spoiledOpen = !app.spoiledOpen; renderRegister(); });
     $('#r-body').addEventListener('click', regAction);
+    $('#r-body').addEventListener('change', e => { const k = e.target.dataset?.sel; if (!k || !canDelete()) return; e.target.checked ? app.regSel.add(k) : app.regSel.delete(k); renderRegister(); });
+    $('#r-bulk').addEventListener('click', bulkAction);
+    $('#r-bulkbox').addEventListener('click', bulkAction);
+    $('#r-bulkbox').addEventListener('submit', bulkDelete);
     $('#r-spoilbox').addEventListener('submit', spoilSubmit);
     $('#r-spoilbox').addEventListener('click', e => { if (e.target.id === 'sp-cancel') { app.spoiledOpen = false; renderRegister(); } });
   }
@@ -973,7 +980,7 @@ function renderRegister() {
       (r.status === 'Issued' ? `<button class="btn sm" data-act="Released" data-k="${key}">Released</button>` : '') +
       (r.status !== 'Cleared' ? `<button class="btn sm" data-act="Cleared" data-k="${key}">Cleared</button>` : '') +
       `<button class="btn sm danger" data-act="void" data-k="${key}">Void</button>`;
-    let h = `<tr class="${st === 'Voided' ? 'void' : ''}"><td class="mono">${r.noStr}</td><td class="mono">${r.date}</td><td>${esc(r.payee || '—')}${r.voidReason ? `<div class="hint">Void: ${esc(r.voidReason)}</div>` : ''}${r.acPayee ? `<div class="hint">A/C payee only</div>` : ''}</td><td class="r mono amt">${peso(r.amount)}</td><td>${esc(a ? bankName(a.bank) : '—')}<div class="hint mono">${esc(a?.number || '')}</div></td><td class="mono">${esc(r.cvNo || '')}</td><td><span class="st st-${st}">${st}</span>${r.printed > 1 ? `<div class="hint">printed ${r.printed}×</div>` : ''}</td><td><div class="rowacts">${acts}${canDelete() ? `<button class="btn sm" data-act="reissue" data-k="${key}" title="Delete this entry and load it into Write check to issue it again">Re-issue</button><button class="btn sm danger" data-act="delete" data-k="${key}" title="Delete this entry from the register">Delete</button>` : ''}</div></td></tr>`;
+    let h = `<tr class="${st === 'Voided' ? 'void' : ''}${app.regSel.has(key) ? ' sel' : ''}"><td class="mono">${canDelete() ? `<label class="inline" style="gap:6px"><input type="checkbox" data-sel="${key}" ${app.regSel.has(key) ? 'checked' : ''} aria-label="Select check ${r.noStr}">${r.noStr}</label>` : r.noStr}</td><td class="mono">${r.date}</td><td>${esc(r.payee || '—')}${r.voidReason ? `<div class="hint">Void: ${esc(r.voidReason)}</div>` : ''}${r.acPayee ? `<div class="hint">A/C payee only</div>` : ''}</td><td class="r mono amt">${peso(r.amount)}</td><td>${esc(a ? bankName(a.bank) : '—')}<div class="hint mono">${esc(a?.number || '')}</div></td><td class="mono">${esc(r.cvNo || '')}</td><td><span class="st st-${st}">${st}</span>${r.printed > 1 ? `<div class="hint">printed ${r.printed}×</div>` : ''}</td><td><div class="rowacts">${acts}${canDelete() ? `<button class="btn sm" data-act="reissue" data-k="${key}" title="Delete this entry and load it into Write check to issue it again">Re-issue</button><button class="btn sm danger" data-act="delete" data-k="${key}" title="Delete this entry from the register">Delete</button>` : ''}</div></td></tr>`;
     if (app.delOpen?.key === key) h += `<tr class="voidrow"><td colspan="8"><form class="actions" data-delform="${key}"><b>${app.delOpen.reissue ? 'Delete and re-issue' : 'Delete'} check ${r.noStr}?</b><span class="hint" style="color:inherit">${r.status === 'Cleared' || r.status === 'Released' ? `<b>This check is marked ${r.status}.</b> Delete it only if it was a test or was entered by mistake. ` : ''}${app.delOpen.reissue ? 'The entry is removed and its details are loaded into Write check, so you can correct them and issue the same check number again.' : 'The entry is removed from the register and the check number can be used again.'} The deleted details are kept in the audit log.</span><input id="del-reason" placeholder="Reason (required)" style="max-width:280px" required><button class="btn sm danger">${app.delOpen.reissue ? 'Delete & re-issue' : 'Delete entry'}</button><button type="button" class="btn sm" data-act="canceldel">Keep</button></form></td></tr>`;
     if (app.voidOpen === key) h += `<tr class="voidrow"><td colspan="8"><form class="actions" data-voidform="${key}"><b>Void check ${r.noStr}?</b><input id="void-reason" placeholder="Reason (required)" style="max-width:320px" required><button class="btn sm danger">Confirm void</button><button type="button" class="btn sm" data-act="cancelvoid">Keep check</button></form></td></tr>`;
     return h;
@@ -982,12 +989,54 @@ function renderRegister() {
   if (rows.length > 500) $('#r-body').insertAdjacentHTML('beforeend', `<tr><td colspan="8" class="hint">Showing the latest 500 of ${rows.length}. Narrow the filters or export to Excel for all.</td></tr>`);
   const vf = $('[data-voidform]'); if (vf) { vf.addEventListener('submit', voidSubmit); $('#void-reason').focus(); }
   const df = $('[data-delform]'); if (df) { df.addEventListener('submit', delSubmit); $('#del-reason').focus(); }
+  renderBulk(rows);
   // summary
   $('#r-sum').innerHTML = accts.map(a => {
     const rs = rows.filter(r => r.accountId === a.id); const last = lastCheckNo(a.id);
     const sum = l => peso(l.reduce((s, r) => s + (r.amount || 0), 0));
     return `<tr><td>${esc(acctLabel(a))}</td><td>${esc(coName(a.companyId))}</td><td class="mono">${last ? padNo(a, last) : '—'}</td><td class="r mono">${rs.length}</td><td class="r mono">${sum(rs.filter(r => !['Cleared','Voided'].includes(effStatus(r))))}</td><td class="r mono">${sum(rs.filter(r => r.status === 'Cleared'))}</td><td class="r mono">${rs.filter(r => r.status === 'Voided').length}</td></tr>`;
   }).join('') || `<tr><td colspan="7" class="empty">No bank accounts yet.</td></tr>`;
+}
+// Bulk delete (administrators only): tick checks in the register, give one reason, delete them all. Each deletion is written to the audit log.
+function renderBulk(rows) {
+  if (!canDelete()) { app.regSel.clear(); app.bulkOpen = false; $('#r-bulk').innerHTML = ''; $('#r-bulkbox').innerHTML = ''; app._bulkShown = null; return; }
+  const live = new Set(allChecks().map(r => r.accountId + '|' + r.no)); for (const k of [...app.regSel]) if (!live.has(k)) app.regSel.delete(k);
+  const n = app.regSel.size, shown = rows.slice(0, 500);
+  if (!n) app.bulkOpen = false;
+  $('#r-bulk').innerHTML = (shown.length ? `<button class="btn" data-bulk="all">Select all shown (${shown.length})</button>` : '') +
+    (n ? `<button class="btn" data-bulk="none">Clear selection</button><button class="btn danger" data-bulk="open">Delete selected (${n})</button>` : '');
+  const sig = app.bulkOpen ? 'open:' + n : '';
+  if (app._bulkShown === sig) return; app._bulkShown = sig;
+  if (!app.bulkOpen) { $('#r-bulkbox').innerHTML = ''; return; }
+  const sel = allChecks().filter(r => app.regSel.has(r.accountId + '|' + r.no));
+  const total = sel.reduce((t, r) => t + (r.amount || 0), 0), risky = sel.filter(r => ['Cleared', 'Released'].includes(r.status)).length;
+  $('#r-bulkbox').innerHTML = `<form class="card form" style="margin-bottom:12px;border-color:var(--bad)"><h2>Delete ${n} check${n > 1 ? 's' : ''} from the register?</h2>
+    <p class="hint" style="margin:0">Total ₱${peso(total)}. ${risky ? `<b>${risky} of them ${risky > 1 ? 'are' : 'is'} marked Released or Cleared.</b> ` : ''}The entries are removed permanently. Each one is recorded in the audit log with your reason. To keep a record of a check that was not used, Void it instead.</p>
+    <div class="row" style="align-items:end"><label class="f">Reason (required)<input id="bulk-reason" required placeholder="e.g. Test transactions"></label>
+    <div class="actions" style="margin:0"><button class="btn danger" id="bulk-go">Delete ${n} check${n > 1 ? 's' : ''}</button><button type="button" class="btn" data-bulk="cancel">Cancel</button></div></div><div id="bulk-msg"></div></form>`;
+  $('#bulk-reason').focus();
+}
+function bulkAction(e) {
+  const b = e.target.closest('[data-bulk]'); if (!b || !canDelete()) return; const a = b.dataset.bulk;
+  if (a === 'all') regRows().slice(0, 500).forEach(r => app.regSel.add(r.accountId + '|' + r.no));
+  if (a === 'none') { app.regSel.clear(); app.bulkOpen = false; }
+  if (a === 'open') { app.bulkOpen = true; app.delOpen = null; app.voidOpen = null; }
+  if (a === 'cancel') app.bulkOpen = false;
+  renderRegister();
+}
+async function bulkDelete(e) {
+  e.preventDefault(); if (!canDelete()) return;
+  const reason = $('#bulk-reason').value.trim(); if (!reason) { $('#bulk-reason').focus(); return; }
+  const keys = [...app.regSel]; const btn = $('#bulk-go'); btn.disabled = true; let done = 0, failed = 0, lastErr = null;
+  for (const k of keys) {
+    const [acctId, n] = k.split('|');
+    btn.textContent = `Deleting ${done + failed + 1} of ${keys.length}…`;
+    try { await deleteCheck(acctId, +n, reason); done++; app.regSel.delete(k); } catch (err) { failed++; lastErr = err; console.error(err); }
+  }
+  app.bulkOpen = !!failed; app._bulkShown = null;
+  if (failed) toast(`${done} deleted, ${failed} could not be deleted: ${lastErr?.message || lastErr}`, 'bad');
+  else toast(`${done} check${done > 1 ? 's' : ''} deleted from the register.`);
+  renderRegister();
 }
 async function regAction(e) {
   const b = e.target.closest('[data-act]'); if (!b) return;
