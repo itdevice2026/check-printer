@@ -693,9 +693,11 @@ const isPrint = () => app.outMode === 'print';
 
 const mounted = {};
 function renderAll(force) {
-  // Layouts & calibration is for administrators only: hide the tab and leave it if a user lands there.
-  const lt = $('.tabs [data-tab="layouts"]'); if (lt) lt.hidden = !canEditLayouts();
-  if (app.tab === 'layouts' && !canEditLayouts()) { app.tab = 'write'; $('#tab-layouts').innerHTML = ''; mounted.layouts = false; }
+  // Layouts & calibration and Companies & audit are for administrators only: hide those tabs and leave them if a user lands there.
+  for (const [tab, ok] of [['layouts', canEditLayouts()], ['companies', canManageCompanies()]]) {
+    const b = $(`.tabs [data-tab="${tab}"]`); if (b) b.hidden = !ok;
+    if (app.tab === tab && !ok) { app.tab = 'write'; $('#tab-' + tab).innerHTML = ''; mounted[tab] = false; }
+  }
   renderTop();
   const t = app.tab;
   if (t === 'write') renderWrite(force);
@@ -1004,6 +1006,8 @@ async function regAction(e) {
 function canDelete() { return true; }
 // Layouts & calibration: who may change them. The online edition limits this to administrators.
 function canEditLayouts() { return true; }
+// Companies & audit: who may open it. The online edition limits this to administrators.
+function canManageCompanies() { return true; }
 async function deleteCheck(acctId, no, reason) {
   const a = S.accounts[acctId]; const bid = bucketId(acctId, no); const b = S.checks[bid]; const r = b?.checks?.[no]; if (!r) return null;
   const rest = {...b.checks}; delete rest[no];
