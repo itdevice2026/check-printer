@@ -108,6 +108,7 @@ spoilSubmit = async function (e) {
   catch (err) { writeErr(err); }
 };
 canDelete = function () { return CP_ROLE === 'admin'; };
+canEditLayouts = function () { return CP_ROLE === 'admin'; };
 deleteCheck = async function (acctId, no, reason) {
   const r = S.checks[bucketId(acctId, no)]?.checks?.[no]; if (!r) return null;
   await must(SB.rpc('cp_delete_check', {p_id: r._id, p_reason: reason}));

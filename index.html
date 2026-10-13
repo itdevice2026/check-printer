@@ -106,6 +106,7 @@ svg.leaf .tag.on rect{fill:#0F6B55}svg.leaf .tag.on text{fill:#FFFFFF}
 .msg{border-radius:7px;padding:7px 10px;font-size:13px}
 .msg.bad{background:var(--bad-soft);color:var(--bad)}
 .msg.warn{background:var(--warn-soft);color:var(--warn)}
+.split.locked input:disabled,.split.locked select:disabled{opacity:.75;cursor:not-allowed}
 .msg.info{background:var(--info-soft);color:var(--info)}
 .msg.good{background:var(--good-soft);color:var(--good)}
 .msg a{color:inherit;font-weight:600;cursor:pointer;text-decoration:underline}
@@ -998,6 +999,8 @@ async function regAction(e) {
 }
 // Delete a check entry (Issued or Voided only) so it can be corrected and issued again.
 function canDelete() { return true; }
+// Layouts & calibration: who may change them. The online edition limits this to administrators.
+function canEditLayouts() { return true; }
 async function deleteCheck(acctId, no, reason) {
   const a = S.accounts[acctId]; const bid = bucketId(acctId, no); const b = S.checks[bid]; const r = b?.checks?.[no]; if (!r) return null;
   const rest = {...b.checks}; delete rest[no];
@@ -1122,7 +1125,7 @@ function renderLayouts(force) {
   if (!app.layoutDraft) { app.layoutDraft = getLayout(app.layoutId); app.layoutDirty = false; }
   if (mounted.layouts && !force) { refreshLayoutPreview(); return; }
   mounted.layouts = true;
-  const L = app.layoutDraft; const mine = Object.keys(S.layouts);
+  const L = app.layoutDraft; const mine = Object.keys(S.layouts); const locked = !canEditLayouts();
   const users = accountList('ALL').filter(a => (a.layoutId || 'std-' + a.bank) === app.layoutId);
   const inp = (path, label, type, opts) => {
     const v = getPath(L, path);
@@ -1130,11 +1133,11 @@ function renderLayouts(force) {
     if (type === 'sel') return `<label class="f">${label}<select data-p="${path}">${opts.map(([k, t]) => `<option value="${esc(k)}" ${String(v) === k ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>`;
     return `<label class="f">${label}<input type="number" step="0.1" data-p="${path}" data-num="1" value="${esc(v)}"></label>`;
   };
-  el.innerHTML = `<div class="split" style="grid-template-columns:minmax(0,460px) minmax(0,1fr)">
+  el.innerHTML = `${locked ? `<div class="msg warn lock-note" style="margin-bottom:14px"><b>&#128274; Locked.</b> Only an administrator can change layouts and printer calibration. You can view the layouts and download alignment tests and sample checks.</div>` : ''}<div class="split ${locked ? 'locked' : ''}" style="grid-template-columns:minmax(0,460px) minmax(0,1fr)">
     <div class="form">
       <div class="card form">
         <div class="sec-head"><h2>Layout</h2><span class="dirty" id="l-dirty">${app.layoutDirty ? 'Unsaved changes' : ''}</span></div>
-        <label class="f">Editing<select id="l-pick"><optgroup label="Your calibrated layouts">${mine.map(id => `<option value="${id}">${esc(all[id].name)}</option>`).join('')}</optgroup><optgroup label="Standard templates">${Object.keys(STD).filter(id => !S.layouts[id]).map(id => `<option value="${id}">${esc(STD[id].name)}</option>`).join('')}</optgroup></select></label>
+        <label class="f">${locked ? 'Viewing' : 'Editing'}<select id="l-pick"><optgroup label="Your calibrated layouts">${mine.map(id => `<option value="${id}">${esc(all[id].name)}</option>`).join('')}</optgroup><optgroup label="Standard templates">${Object.keys(STD).filter(id => !S.layouts[id]).map(id => `<option value="${id}">${esc(STD[id].name)}</option>`).join('')}</optgroup></select></label>
         <label class="f">Layout name<input data-p="name" value="${esc(L.name)}"></label>
         <p class="hint" style="margin:0">${users.length ? 'Used by: ' + users.map(a => esc(acctLabel(a))).join('; ') : 'No bank account uses this layout yet. Pick it in Bank accounts.'}</p>
         <div class="mini">
@@ -1161,26 +1164,28 @@ function renderLayouts(force) {
     </div>
     <div class="sticky">
       <div class="leaf-wrap">
-        <div class="leaf-head"><h3>Drag Date, Amount, Payee and Amount in words</h3><label class="inline" style="font-size:13px"><input type="checkbox" id="l-design" ${app.layoutDesign ? 'checked' : ''}> Show bank design</label><span class="hint mono" id="l-pos"></span></div>
+        <div class="leaf-head"><h3>${locked ? 'Layout preview (view only)' : 'Drag Date, Amount, Payee and Amount in words'}</h3><label class="inline" style="font-size:13px"><input type="checkbox" id="l-design" ${app.layoutDesign ? 'checked' : ''}> Show bank design</label><span class="hint mono" id="l-pos"></span></div>
         <div id="l-leaf"></div>
         <ul class="notes"><li>X and Y are millimetres from the top-left corner of the leaf to the start of the text baseline (the centre of the first digit for date boxes).</li><li>Measure a blank leaf from your checkbook with a ruler, set the positions, then download an alignment test, print it on plain paper at 100% and hold it against the leaf in front of a light.</li><li>The standard templates are a starting point based on the common 8" × 3" PCHC leaf. Calibrate each bank before printing live checks.</li></ul>
       </div>
       <div class="actions">
-        <button class="btn primary" id="l-save">Save layout</button>
-        <button class="btn" id="l-copy">Save as new layout</button>
+        ${locked ? '' : `<button class="btn primary" id="l-save">Save layout</button>
+        <button class="btn" id="l-copy">Save as new layout</button>`}
         <button class="btn" id="l-test">Alignment test PDF</button>
         <button class="btn" id="l-sample">Sample check PDF</button>
-        ${S.layouts[app.layoutId] ? `<button class="btn danger" id="l-reset">${app.layoutId.startsWith('std-') ? 'Reset to template' : 'Delete layout'}</button>` : ''}
+        ${S.layouts[app.layoutId] && !locked ? `<button class="btn danger" id="l-reset">${app.layoutId.startsWith('std-') ? 'Reset to template' : 'Delete layout'}</button>` : ''}
       </div>
       <div id="l-msg"></div>
     </div></div>`;
   $('#l-pick').value = app.layoutId;
   $('#l-pick').addEventListener('change', e => { app.layoutId = e.target.value; app.layoutDraft = null; renderLayouts(true); });
   if (!el._bound) { el._bound = true; el.addEventListener('input', layoutInput); el.addEventListener('change', layoutInput); }
-  $('#l-save').addEventListener('click', () => saveLayout(false));
-  $('#l-copy').addEventListener('click', () => saveLayout(true));
+  if (locked) el.querySelectorAll('[data-p], #l-mx, #l-my, #l-cal').forEach(i => { i.disabled = true; });
+  $('#l-save')?.addEventListener('click', () => saveLayout(false));
+  $('#l-copy')?.addEventListener('click', () => saveLayout(true));
   $('#l-design').addEventListener('change', e => { app.layoutDesign = e.target.checked; refreshLayoutPreview(); });
   $('#l-cal').addEventListener('click', () => {
+    if (!canEditLayouts()) return;
     const D = app.layoutDraft, mx = parseFloat($('#l-mx').value), my = parseFloat($('#l-my').value); let msg = [];
     const cur = v => (isFinite(+v) && +v >= 80 && +v <= 120 ? +v : 100);
     if (isFinite(mx) && mx > 150 && mx < 210) { D.scaleX = Math.round(cur(D.scaleX) * 180 / mx * 100) / 100; msg.push('scale X ' + D.scaleX + '%'); }
@@ -1200,7 +1205,7 @@ function renderLayouts(force) {
   bindDrag();
 }
 function layoutInput(e) {
-  const t = e.target; const p = t.dataset?.p; if (!p) return;
+  const t = e.target; const p = t.dataset?.p; if (!p || !canEditLayouts()) return;
   if (e.type === 'input' && (t.type === 'checkbox' || t.tagName === 'SELECT')) return;
   let v = t.type === 'checkbox' ? t.checked : t.value; if (t.dataset.num) { v = parseFloat(v); if (!isFinite(v)) return; }
   setPath(app.layoutDraft, p, v); app.layoutDirty = true; $('#l-dirty').textContent = 'Unsaved changes';
@@ -1213,7 +1218,7 @@ function refreshLayoutPreview() {
   const L = app.layoutDraft; if (!$('#l-leaf')) return;
   const u = accountList('ALL').find(a => (a.layoutId || 'std-' + a.bank) === app.layoutId);
   const sd = {...sampleData(L), ...(u ? {acctNo: u.number, acctName: u.name, branch: u.branch, brstn: u.brstn, noStr: padNo(u, u.nextNo)} : {})};
-  $('#l-leaf').innerHTML = leafSVG(L, sd, {editable: true, selected: app.layoutSel, plain: !app.layoutDesign});
+  $('#l-leaf').innerHTML = leafSVG(L, sd, {editable: canEditLayouts(), selected: app.layoutSel, plain: !app.layoutDesign});
   const F = L.fields[app.layoutSel]; $('#l-pos').textContent = F ? `${app.layoutSel}  x ${r1(+F.x)}  y ${r1(+F.y)} mm` : '';
 }
 let drag = null;
@@ -1232,14 +1237,14 @@ window.addEventListener('pointerup', () => {
 function bindDrag() {
   const box = $('#l-leaf');
   box.addEventListener('pointerdown', e => {
-    const t = e.target.closest('[data-field]'); if (!t) return; e.preventDefault();
+    if (!canEditLayouts()) return; const t = e.target.closest('[data-field]'); if (!t) return; e.preventDefault();
     const f = t.dataset.field; const F = app.layoutDraft.fields[f];
     selectField(f); const rect = box.querySelector('svg').getBoundingClientRect();
     drag = {f, sx: e.clientX, sy: e.clientY, x: +F.x, y: +F.y, k: +app.layoutDraft.checkW / rect.width};
     refreshLayoutPreview();
   });
   box.addEventListener('keydown', e => {
-    const F = app.layoutDraft.fields[app.layoutSel]; if (!F) return;
+    const F = app.layoutDraft.fields[app.layoutSel]; if (!F || !canEditLayouts()) return;
     const step = e.shiftKey ? 1 : 0.1; const m = {ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step]}[e.key];
     if (!m) return; e.preventDefault(); F.x = r1(+F.x + m[0]); F.y = r1(+F.y + m[1]); app.layoutDirty = true; refreshLayoutPreview();
     const i1 = $(`[data-p="fields.${app.layoutSel}.x"]`), i2 = $(`[data-p="fields.${app.layoutSel}.y"]`); if (i1) i1.value = F.x; if (i2) i2.value = F.y;
@@ -1247,6 +1252,7 @@ function bindDrag() {
   box.tabIndex = 0; box.setAttribute('aria-label', 'Check leaf. Drag a field, or select one and use arrow keys (Shift for 1 mm steps).');
 }
 async function saveLayout(asCopy) {
+  if (!canEditLayouts()) { toast('Only an administrator can change layouts and calibration.', 'warn'); return; }
   const L = clone(app.layoutDraft);
   const id = asCopy ? 'lay' + uid() : app.layoutId;
   if (asCopy) L.name = (L.name || 'Layout') + ' (copy)';
