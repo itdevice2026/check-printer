@@ -391,7 +391,66 @@ function payeeHint() {
   st.textContent = p ? '✓ Saved payee' + (p.tin ? ' · TIN ' + p.tin : '') : (v.trim() ? 'New payee' : `${CP_PAYEES.length} saved payee${CP_PAYEES.length === 1 ? '' : 's'}`);
 }
 
-let cpPayQ = '', cpPayDel = null, cpPayEdit = null;
+let cpPayQ = '', cpPayDel = null, cpPayEdit = null, cpPayImport = null;
+/* ---------- payee import / export (Excel or CSV) ---------- */
+function payeeXlsx(name, rows) {
+  const ws = XLSX.utils.json_to_sheet(rows); ws['!cols'] = [40, 16, 18, 60, 8, 12].map(w => ({wch: w}));
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Payees');
+  saveFile(name, new Blob([XLSX.write(wb, {bookType: 'xlsx', type: 'array'})], {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+}
+async function payeeImportPreview(file) {
+  const box = $('#cp-pimsg'); cpPayImport = null;
+  try {
+    const wb = XLSX.read(await file.arrayBuffer(), {type: 'array'}); const ws = wb.Sheets[wb.SheetNames[0]];
+    const raw = XLSX.utils.sheet_to_json(ws, {defval: '', raw: false}); if (!raw.length) throw new Error('The file has no rows under the header.');
+    const heads = Object.keys(raw[0]); const pick = re => heads.find(h => re.test(h.trim().toLowerCase()));
+    const hName = pick(/^(payee|supplier|vendor)?\s*name$|^payee$|^name/) || pick(/name|payee/), hCode = pick(/code/), hTin = pick(/^tin\b|\btin$|tax/), hAddr = pick(/addr/);
+    if (!hName) throw new Error('No payee name column found. Use the template: Payee name, Supplier code, TIN, Address.');
+    const clean = v => String(v ?? '').replace(/\s+/g, ' ').trim();
+    const byKey = new Map(); let blank = 0;
+    for (const r of raw) {
+      const name = clean(r[hName]).slice(0, 120); if (!name) { blank++; continue; }
+      const k = payKey(name), prev = byKey.get(k) || {};
+      byKey.set(k, {name: prev.name || name, code: clean(hCode ? r[hCode] : '').slice(0, 40) || prev.code || '', tin: clean(hTin ? r[hTin] : '').slice(0, 30) || prev.tin || '', address: clean(hAddr ? r[hAddr] : '').slice(0, 300) || prev.address || ''});
+    }
+    const add = [], upd = []; let same = 0;
+    for (const v of byKey.values()) {
+      const ex = findPayee(v.name);
+      if (!ex) { add.push(v); continue; }
+      const ch = {}; for (const f of ['code', 'tin', 'address']) if (v[f] && v[f] !== (ex[f] || '')) ch[f] = v[f];
+      if (Object.keys(ch).length) upd.push({id: ex.id, name: ex.name, ch}); else same++;
+    }
+    cpPayImport = {add, upd};
+    const sample = [...add.map(v => ['New', v]), ...upd.map(u => ['Update', {name: u.name, ...u.ch}])].slice(0, 8);
+    box.innerHTML = `<div class="msg ${add.length || upd.length ? 'ok' : 'warn'}"><b>${esc(file.name)}</b>: ${add.length} new payee${add.length === 1 ? '' : 's'}, ${upd.length} to update, ${same} already up to date${blank ? `, ${blank} row${blank === 1 ? '' : 's'} without a name skipped` : ''}.</div>
+      ${sample.length ? `<div class="table-wrap"><table class="t"><thead><tr><th></th><th>Payee</th><th>Code</th><th>TIN</th><th>Address</th></tr></thead><tbody>${sample.map(([t, v]) => `<tr><td class="hint">${t}</td><td>${esc(v.name)}</td><td>${esc(v.code || '')}</td><td class="mono">${esc(v.tin || '')}</td><td class="hint">${esc(v.address || '')}</td></tr>`).join('')}</tbody></table></div>${add.length + upd.length > 8 ? `<p class="hint" style="margin:0">…and ${add.length + upd.length - 8} more.</p>` : ''}` : ''}
+      <div class="actions">${add.length || upd.length ? `<button type="button" class="btn primary" id="cp-pigo">Import ${add.length + upd.length} payee${add.length + upd.length === 1 ? '' : 's'}</button>` : ''}<button type="button" class="btn" id="cp-pix">Cancel</button></div>`;
+    $('#cp-pix').addEventListener('click', () => { cpPayImport = null; box.innerHTML = ''; });
+    $('#cp-pigo')?.addEventListener('click', payeeImportRun);
+  } catch (err) { box.innerHTML = `<div class="msg bad">Could not read ${esc(file.name)}: ${esc(err.message)}</div>`; }
+}
+async function payeeImportRun(e) {
+  const job = cpPayImport; if (!job) return; const b = e.currentTarget; b.disabled = true;
+  let added = 0, updated = 0, failed = 0;
+  try {
+    for (let i = 0; i < job.add.length; i += 500) {
+      const chunk = job.add.slice(i, i + 500).map(v => ({name: v.name, code: v.code || null, tin: v.tin || null, address: v.address || null}));
+      b.textContent = `Adding ${Math.min(i + 500, job.add.length)} of ${job.add.length}…`;
+      try { const rows = await must(SB.from('cp_payees').insert(chunk).select()); rows.forEach(r => applyRow('cp_payees', r)); added += rows.length; }
+      catch (err) { // a name added by someone else meanwhile: fall back to one at a time
+        for (const r of chunk) { try { applyRow('cp_payees', await must(SB.from('cp_payees').insert(r).select().single())); added++; } catch { failed++; } }
+      }
+    }
+    for (let i = 0; i < job.upd.length; i++) {
+      const u = job.upd[i]; if (i % 20 === 0) b.textContent = `Updating ${i + 1} of ${job.upd.length}…`;
+      try { applyRow('cp_payees', await must(SB.from('cp_payees').update(u.ch).eq('id', u.id).select().single())); updated++; } catch { failed++; }
+    }
+  } finally {
+    cpPayImport = null; audit('Imported payees', `${added} added, ${updated} updated${failed ? `, ${failed} failed` : ''}`);
+    toast(`${added} payee${added === 1 ? '' : 's'} added, ${updated} updated${failed ? `, ${failed} could not be saved` : ''}.`, failed ? 'warn' : '');
+    renderPayees(true);
+  }
+}
 function payeeRows() {
   const q = cpPayQ.trim().toLowerCase(), isAdmin = CP_ROLE === 'admin';
   const list = CP_PAYEES.filter(p => !q || [p.name, p.tin].some(x => (x || '').toLowerCase().includes(q))).sort((a, b) => a.name.localeCompare(b.name));
@@ -403,7 +462,7 @@ function renderPayees(force) {
   const el = $('#tab-payees'); if (!el) return;
   if ($('#cp-payees') && !force) { $('#cp-plist').innerHTML = payeeRows(); $('#cp-pcount').textContent = CP_PAYEES.length; return; }
   const ed = cpPayEdit ? CP_PAYEES.find(p => p.id === cpPayEdit) : null; if (!ed) cpPayEdit = null;
-  el.innerHTML = `<div class="split" id="cp-payees">
+  el.innerHTML = `<div class="split" id="cp-payees"><div class="form">
     <form id="cp-padd" class="card form" autocomplete="off"><div class="sec-head"><h2>${ed ? 'Edit payee' : 'Add payee'}</h2></div>
       <label class="f">Payee name (as printed on the check)<input id="cp-pname" required maxlength="120" value="${esc(ed?.name || '')}" placeholder="e.g. ABC Meat Supply Inc."></label>
       <div class="row"><label class="f">Supplier code (optional)<input id="cp-pcode" maxlength="40" value="${esc(ed?.code || '')}"></label>
@@ -412,10 +471,19 @@ function renderPayees(force) {
       <div class="actions"><button class="btn primary" type="submit">${ed ? 'Save changes' : 'Add payee'}</button>${ed ? '<button class="btn" type="button" id="cp-pcancel">Cancel</button>' : ''}</div>
       <p class="hint" style="margin:0">Payees are also saved automatically each time a check is issued. Saved payees appear as choices in the Payee field of Write check.</p>
     </form>
+    <div class="card form" id="cp-pimp"><h2>Import payees</h2>
+      <p class="hint" style="margin:0">Upload an Excel (.xlsx) or CSV file with the columns <b>Payee name</b>, <b>Supplier code</b>, <b>TIN</b> and <b>Address</b> (only the name is required). New payees are added; payees already saved get their code, TIN and address filled in from the file.</p>
+      <div class="actions"><label class="btn primary" for="cp-pfile">Choose file…</label><input type="file" id="cp-pfile" accept=".xlsx,.xls,.csv" hidden>
+        <button type="button" class="btn" id="cp-ptpl">Download template</button><button type="button" class="btn" id="cp-pexp">Export payees</button></div>
+      <div id="cp-pimsg"></div>
+    </div></div>
     <div><div class="sec-head" style="margin-bottom:10px"><h2>Payees</h2><span class="hint"><span id="cp-pcount">${CP_PAYEES.length}</span> saved</span></div>
       <label class="f" style="margin-bottom:10px">Search<input id="cp-pq" placeholder="Name or TIN" value="${esc(cpPayQ)}"></label>
       <div class="table-wrap"><table class="t"><thead><tr><th>Payee</th><th>TIN</th><th class="r">Checks</th><th>Last used</th><th></th></tr></thead><tbody id="cp-plist">${payeeRows()}</tbody></table></div></div></div>`;
   $('#cp-pq').addEventListener('input', e => { cpPayQ = e.target.value; $('#cp-plist').innerHTML = payeeRows(); });
+  $('#cp-ptpl').addEventListener('click', () => payeeXlsx('Payee-import-template.xlsx', [{'Payee name': 'ABC Meat Supply Inc.', 'Supplier code': 'S-0001', 'TIN': '000-000-000-000', 'Address': 'Street, City, Province'}]));
+  $('#cp-pexp').addEventListener('click', () => payeeXlsx(`Payees-${todayISO()}.xlsx`, CP_PAYEES.slice().sort((a, b) => a.name.localeCompare(b.name)).map(p => ({'Payee name': p.name, 'Supplier code': p.code || '', 'TIN': p.tin || '', 'Address': p.address || '', 'Checks': p.use_count || 0, 'Last used': p.last_used || ''}))));
+  $('#cp-pfile').addEventListener('change', async e => { const f = e.target.files[0]; e.target.value = ''; if (f) await payeeImportPreview(f); });
   $('#cp-pcancel')?.addEventListener('click', () => { cpPayEdit = null; renderPayees(true); });
   $('#cp-padd').addEventListener('submit', async e => {
     e.preventDefault(); const btn = e.submitter; if (btn) btn.disabled = true;
