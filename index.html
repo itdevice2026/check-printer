@@ -1092,6 +1092,17 @@ async function regAction(e) {
 function canDelete() { return true; }
 // Layouts & calibration: who may change them. The online edition limits this to administrators.
 function canEditLayouts() { return true; }
+// A calibrated layout can be locked by an administrator; the database refuses changes to it until it is unlocked.
+function layoutLocked(id) { return !!S.layouts[id]?.locked; }
+function layoutEditable() { return canEditLayouts() && !layoutLocked(app.layoutId); }
+function whoAmI() { try { if (typeof CP_SESSION !== 'undefined' && CP_SESSION?.user?.email) return CP_SESSION.user.email; } catch {} return ME.name || ''; }
+async function setLayoutLock(lock) {
+  const id = app.layoutId, cur = S.layouts[id]; if (!cur || !canEditLayouts()) return;
+  const data = clone(cur); delete data.lockedBy; delete data.lockedAt; data.locked = !!lock;
+  if (lock) { data.lockedBy = whoAmI(); data.lockedAt = new Date().toISOString().slice(0, 19) + 'Z'; }
+  try { await put('layouts', id, data); audit(lock ? 'Locked layout' : 'Unlocked layout', cur.name || id); toast(lock ? 'Layout locked. It cannot be changed until an administrator unlocks it.' : 'Layout unlocked. You can now edit and save it.'); app.layoutDraft = null; renderLayouts(true); }
+  catch (e) { writeErr(e); }
+}
 // Companies & audit: who may open it. The online edition limits this to administrators.
 function canManageCompanies() { return true; }
 async function deleteCheck(acctId, no, reason) {
@@ -1214,7 +1225,7 @@ function renderLayouts(force) {
   if (!app.layoutDraft) { app.layoutDraft = getLayout(app.layoutId); app.layoutDirty = false; }
   if (mounted.layouts && !force) { refreshLayoutPreview(); return; }
   mounted.layouts = true;
-  const L = app.layoutDraft; const mine = Object.keys(S.layouts); const locked = !canEditLayouts();
+  const L = app.layoutDraft; const mine = Object.keys(S.layouts); const admin = canEditLayouts(), isLocked = layoutLocked(app.layoutId), locked = !admin || isLocked; const lk = S.layouts[app.layoutId] || {};
   const users = accountList('ALL').filter(a => (a.layoutId || 'std-' + a.bank) === app.layoutId);
   const inp = (path, label, type, opts) => {
     const v = getPath(L, path);
@@ -1222,7 +1233,8 @@ function renderLayouts(force) {
     if (type === 'sel') return `<label class="f">${label}<select data-p="${path}">${opts.map(([k, t]) => `<option value="${esc(k)}" ${String(v) === k ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>`;
     return `<label class="f">${label}<input type="number" step="0.1" data-p="${path}" data-num="1" value="${esc(v)}"></label>`;
   };
-  el.innerHTML = `${locked ? `<div class="msg warn lock-note" style="margin-bottom:14px"><b>&#128274; Locked.</b> Only an administrator can change layouts and printer calibration. You can view the layouts and download alignment tests and sample checks.</div>` : ''}<div class="split ${locked ? 'locked' : ''}" style="grid-template-columns:minmax(0,460px) minmax(0,1fr)">
+  el.innerHTML = `${!admin ? `<div class="msg warn lock-note" style="margin-bottom:14px"><b>&#128274; Locked.</b> Only an administrator can change layouts and printer calibration. You can view the layouts and download alignment tests and sample checks.</div>`
+    : isLocked ? `<div class="msg warn lock-note" style="margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span><b>&#128274; This layout is locked (calibrated).</b> ${lk.lockedBy ? 'Locked by ' + esc(lk.lockedBy) : ''}${lk.lockedAt ? ' on ' + esc(fmtDate(String(lk.lockedAt).slice(0, 10), 'MMMM DD, YYYY')) : ''}. Unlock it to change positions or calibration.</span><button type="button" class="btn sm primary" id="l-unlock">Unlock layout</button></div>` : ''}<div class="split ${locked ? 'locked' : ''}" style="grid-template-columns:minmax(0,460px) minmax(0,1fr)">
     <div class="form">
       <div class="card form">
         <div class="sec-head"><h2>Layout</h2><span class="dirty" id="l-dirty">${app.layoutDirty ? 'Unsaved changes' : ''}</span></div>
@@ -1262,6 +1274,7 @@ function renderLayouts(force) {
         <button class="btn" id="l-copy">Save as new layout</button>`}
         <button class="btn" id="l-test">Alignment test PDF</button>
         <button class="btn" id="l-sample">Sample check PDF</button>
+        ${admin && S.layouts[app.layoutId] && !isLocked ? `<button class="btn" id="l-lock" title="Protect this calibrated layout from changes">&#128274; Lock layout</button>` : ''}
         ${S.layouts[app.layoutId] && !locked ? `<button class="btn danger" id="l-reset">${app.layoutId.startsWith('std-') ? 'Reset to template' : 'Delete layout'}</button>` : ''}
       </div>
       <div id="l-msg"></div>
@@ -1270,11 +1283,13 @@ function renderLayouts(force) {
   $('#l-pick').addEventListener('change', e => { app.layoutId = e.target.value; app.layoutDraft = null; renderLayouts(true); });
   if (!el._bound) { el._bound = true; el.addEventListener('input', layoutInput); el.addEventListener('change', layoutInput); }
   if (locked) el.querySelectorAll('[data-p], #l-mx, #l-my, #l-cal').forEach(i => { i.disabled = true; });
+  $('#l-unlock')?.addEventListener('click', () => setLayoutLock(false));
+  $('#l-lock')?.addEventListener('click', () => { if (app.layoutDirty) { $('#l-msg').innerHTML = `<div class="msg warn">Save layout first, then lock it.</div>`; return; } setLayoutLock(true); });
   $('#l-save')?.addEventListener('click', () => saveLayout(false));
   $('#l-copy')?.addEventListener('click', () => saveLayout(true));
   $('#l-design').addEventListener('change', e => { app.layoutDesign = e.target.checked; refreshLayoutPreview(); });
   $('#l-cal').addEventListener('click', () => {
-    if (!canEditLayouts()) return;
+    if (!layoutEditable()) return;
     const D = app.layoutDraft, mx = parseFloat($('#l-mx').value), my = parseFloat($('#l-my').value); let msg = [];
     const cur = v => (isFinite(+v) && +v >= 80 && +v <= 120 ? +v : 100);
     if (isFinite(mx) && mx > 150 && mx < 210) { D.scaleX = Math.round(cur(D.scaleX) * 180 / mx * 100) / 100; msg.push('scale X ' + D.scaleX + '%'); }
@@ -1294,7 +1309,7 @@ function renderLayouts(force) {
   bindDrag();
 }
 function layoutInput(e) {
-  const t = e.target; const p = t.dataset?.p; if (!p || !canEditLayouts()) return;
+  const t = e.target; const p = t.dataset?.p; if (!p || !layoutEditable()) return;
   if (e.type === 'input' && (t.type === 'checkbox' || t.tagName === 'SELECT')) return;
   let v = t.type === 'checkbox' ? t.checked : t.value; if (t.dataset.num) { v = parseFloat(v); if (!isFinite(v)) return; }
   setPath(app.layoutDraft, p, v); app.layoutDirty = true; $('#l-dirty').textContent = 'Unsaved changes';
@@ -1307,7 +1322,7 @@ function refreshLayoutPreview() {
   const L = app.layoutDraft; if (!$('#l-leaf')) return;
   const u = accountList('ALL').find(a => (a.layoutId || 'std-' + a.bank) === app.layoutId);
   const sd = {...sampleData(L), ...(u ? {acctNo: u.number, acctName: u.name, branch: u.branch, brstn: u.brstn, noStr: padNo(u, u.nextNo)} : {})};
-  $('#l-leaf').innerHTML = leafSVG(L, sd, {editable: canEditLayouts(), selected: app.layoutSel, plain: !app.layoutDesign});
+  $('#l-leaf').innerHTML = leafSVG(L, sd, {editable: layoutEditable(), selected: app.layoutSel, plain: !app.layoutDesign});
   const F = L.fields[app.layoutSel]; $('#l-pos').textContent = F ? `${app.layoutSel}  x ${r1(+F.x)}  y ${r1(+F.y)} mm` : '';
 }
 let drag = null;
@@ -1326,14 +1341,14 @@ window.addEventListener('pointerup', () => {
 function bindDrag() {
   const box = $('#l-leaf');
   box.addEventListener('pointerdown', e => {
-    if (!canEditLayouts()) return; const t = e.target.closest('[data-field]'); if (!t) return; e.preventDefault();
+    if (!layoutEditable()) return; const t = e.target.closest('[data-field]'); if (!t) return; e.preventDefault();
     const f = t.dataset.field; const F = app.layoutDraft.fields[f];
     selectField(f); const rect = box.querySelector('svg').getBoundingClientRect();
     drag = {f, sx: e.clientX, sy: e.clientY, x: +F.x, y: +F.y, k: +app.layoutDraft.checkW / rect.width};
     refreshLayoutPreview();
   });
   box.addEventListener('keydown', e => {
-    const F = app.layoutDraft.fields[app.layoutSel]; if (!F || !canEditLayouts()) return;
+    const F = app.layoutDraft.fields[app.layoutSel]; if (!F || !layoutEditable()) return;
     const step = e.shiftKey ? 1 : 0.1; const m = {ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step]}[e.key];
     if (!m) return; e.preventDefault(); F.x = r1(+F.x + m[0]); F.y = r1(+F.y + m[1]); app.layoutDirty = true; refreshLayoutPreview();
     const i1 = $(`[data-p="fields.${app.layoutSel}.x"]`), i2 = $(`[data-p="fields.${app.layoutSel}.y"]`); if (i1) i1.value = F.x; if (i2) i2.value = F.y;
@@ -1342,10 +1357,11 @@ function bindDrag() {
 }
 async function saveLayout(asCopy) {
   if (!canEditLayouts()) { toast('Only an administrator can change layouts and calibration.', 'warn'); return; }
+  if (!asCopy && layoutLocked(app.layoutId)) { toast('This layout is locked. Unlock it first, or use Save as new layout.', 'warn'); return; }
   const L = clone(app.layoutDraft);
   const id = asCopy ? 'lay' + uid() : app.layoutId;
   if (asCopy) L.name = (L.name || 'Layout') + ' (copy)';
-  delete L.id; L.std = false;
+  delete L.id; L.std = false; if (asCopy) { L.locked = false; delete L.lockedBy; delete L.lockedAt; }
   try { await put('layouts', id, L); audit(asCopy ? 'Created layout' : 'Saved layout', L.name); toast('Layout saved.'); app.layoutId = id; app.layoutDraft = null; renderLayouts(true); }
   catch (e) { writeErr(e); }
 }
