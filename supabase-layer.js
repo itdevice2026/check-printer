@@ -112,6 +112,8 @@ spoilSubmit = async function (e) {
 canDelete = function () { return CP_ROLE === 'admin'; };
 canEditLayouts = function () { return CP_ROLE === 'admin'; };
 canManageCompanies = function () { return CP_ROLE === 'admin'; };
+payeeInfo = function (name) { const k = String(name || '').trim().toLowerCase().replace(/\s+/g, ' '); return k ? CP_PAYEES.find(p => (p.name_key || String(p.name || '').trim().toLowerCase().replace(/\s+/g, ' ')) === k) || null : null; };
+userName = function (idOrEmail) { const v = String(idOrEmail || '').toLowerCase(); const u = CP_USERS.find(x => x.email === v); return u?.full_name || idOrEmail || ''; };
 deleteCheck = async function (acctId, no, reason) {
   const r = S.checks[bucketId(acctId, no)]?.checks?.[no]; if (!r) return null;
   await must(SB.rpc('cp_delete_check', {p_id: r._id, p_reason: reason}));

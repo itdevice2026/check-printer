@@ -514,54 +514,73 @@ function checkPdf(L, d, test = false) {
   drawItems(doc, L, items, ox, oy);
   return doc.output('blob');
 }
+// Lookups the online edition fills in: payee master (address, TIN) and a user's display name.
+function payeeInfo(name) { return null; }
+function userName(idOrEmail) { return idOrEmail || ''; }
+// Check voucher (A4), laid out like the company's accounting-system voucher.
 function voucherPdf(rec) {
-  const {jsPDF} = window.jspdf; const doc = new jsPDF({unit: 'mm', format: 'letter'});
-  const co = S.companies[rec.companyId] || {}, acct = S.accounts[rec.accountId] || {};
-  const M = 15, R = 215.9 - M, W = R - M; let y = 18;
-  const T = (t, x, yy, o = {}) => { doc.setFont('helvetica', o.b ? 'bold' : 'normal'); doc.setFontSize(o.s || 9.5); doc.setTextColor(o.c ?? 0); doc.text(String(t ?? ''), x, yy, o.a ? {align: o.a} : undefined); };
-  doc.setDrawColor(0);
-  T(co.name || 'Company', M, y, {b: 1, s: 13}); y += 5;
-  if (co.address) { doc.setFontSize(8.5); const a = doc.splitTextToSize(co.address, 110); T(a, M, y, {s: 8.5}); y += 4 * a.length; }
-  if (co.tin) { T('TIN: ' + co.tin, M, y, {s: 8.5}); y += 4; }
-  T('CHECK VOUCHER', R, 18, {b: 1, s: 15, a: 'right'});
-  T('CV No.  ' + (rec.cvNo || '—'), R, 24.5, {a: 'right', b: 1});
-  T('Date  ' + fmtDate(rec.date, 'MMMM DD, YYYY'), R, 29.5, {a: 'right'});
-  y = Math.max(y, 34) + 1; doc.setLineWidth(0.5); doc.line(M, y, R, y); y += 7;
-  T('PAYEE', M, y, {s: 7.5, c: 90, b: 1}); T('AMOUNT', R, y, {s: 7.5, c: 90, b: 1, a: 'right'}); y += 5.5;
-  T(rec.payee, M, y, {b: 1, s: 12}); T('PHP ' + peso(rec.amount), R, y, {b: 1, s: 12, a: 'right'}); y += 8;
+  const {jsPDF} = window.jspdf; const doc = new jsPDF({unit: 'mm', format: 'a4'});
+  const co = S.companies[rec.companyId] || {}, acct = S.accounts[rec.accountId] || {}, pay = payeeInfo(rec.payee) || {};
+  const M = 12, R = 210 - M, W = R - M;
+  const T = (t, x, yy, o = {}) => { doc.setFont('helvetica', o.i ? 'italic' : o.b ? 'bold' : 'normal'); doc.setFontSize(o.s || 8.5); doc.setTextColor(o.c ?? 0); doc.text(t ?? '', x, yy, o.a ? {align: o.a} : undefined); };
+  const wrap = (t, w, sz = 8.5) => { doc.setFont('helvetica', 'normal'); doc.setFontSize(sz); return doc.splitTextToSize(String(t ?? ''), w); };
+  doc.setDrawColor(0); doc.setLineWidth(0.3);
+  // header
+  let y = 21;
+  T(co.name || 'Company', M, y, {b: 1, s: 11}); y += 3.6;
+  if (co.address) { const a = wrap(co.address, 105, 7); T(a, M, y, {s: 7}); y += 2.9 * a.length; }
+  if (co.tin) { T('VAT Reg. TIN ' + co.tin, M, y, {s: 7}); y += 2.9; }
+  T('CHECK VOUCHER', 124, 22, {b: 1, s: 13, a: 'center'});
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); const cvv = rec.cvNo || '—', dtv = fmtDate(rec.date, 'MM/DD/YYYY');
+  T(cvv, R, 20, {a: 'right'}); T('CV No.: ', R - doc.getTextWidth(cvv) - 0.5, 20, {b: 1, a: 'right'}); doc.setFont('helvetica', 'normal');
+  T(dtv, R, 23.5, {a: 'right'}); T('Date: ', R - doc.getTextWidth(dtv) - 0.5, 23.5, {b: 1, a: 'right'});
+  y = Math.max(y, 30) + 1; doc.setLineWidth(0.6); doc.line(M, y, R, y); doc.setLineWidth(0.3); y += 4;
+  // label / value box
+  const box = rows => {
+    const lines = rows.map(([k, v]) => wrap(v || '', W - 42)); const h = lines.reduce((t, l) => t + Math.max(1, l.length) * 3.6 + 0.8, 0) + 5;
+    doc.rect(M, y, W, h); let yy = y + 5;
+    rows.forEach(([k], i) => { T(k, M + 3, yy, {b: 1}); T(lines[i], M + 38, yy); yy += Math.max(1, lines[i].length) * 3.6 + 0.8; });
+    y += h + 3.5;
+  };
+  box([['Supplier Code:', pay.code || ''], ['Supplier Name:', rec.payee || ''], ['Supplier Address:', pay.address || ''], ['Supplier TIN:', pay.tin || '']]);
+  box([['Check #:', rec.noStr || ''], ['Bank:', [bankName(acct.bank), acct.name, acct.number].filter(Boolean).join(' - ')], ['Branch:', acct.branch || ''], ['Check Amount:', peso(rec.amount)]]);
+  // payment details
+  T('PAYMENT DETAILS:', M, y + 2, {b: 1}); y += 6.5;
+  const pc = [['Date', fmtDate(rec.date, 'MM/DD/YYYY')], ['Type', rec.payType || 'CHK'], ['Reference No.', rec.refNo || ''], ['APV No.', rec.apvNo || ''], ['Paid Amount', peso(rec.amount)]];
+  const cw = (W - 4 * 3) / 5;
+  pc.forEach(([k, v], i) => { const x = M + i * (cw + 3); T(k, x, y, {b: 1, s: 7.5}); doc.rect(x, y + 1.5, cw, 5.5); T(wrap(v, cw - 3)[0] || '', x + 1.5, y + 5.3); });
+  y += 13;
   // particulars
-  doc.setLineWidth(0.25); const top = y;
-  doc.rect(M, y, W, 7); T('PARTICULARS', M + 2, y + 4.8, {b: 1, s: 8}); T('AMOUNT', R - 2, y + 4.8, {b: 1, s: 8, a: 'right'}); y += 7;
-  doc.setFontSize(9.5); const pl = doc.splitTextToSize(rec.particulars || '—', W - 50);
-  const ph = Math.max(34, pl.length * 4.6 + 8); doc.rect(M, y, W, ph); doc.line(R - 42, top, R - 42, y + ph);
-  T(pl, M + 2, y + 6); T(peso(rec.amount), R - 2, y + 6, {a: 'right'}); y += ph;
-  doc.rect(M, y, W, 7); T('TOTAL', R - 44, y + 4.8, {b: 1, s: 8, a: 'right'}); T(peso(rec.amount), R - 2, y + 4.8, {b: 1, a: 'right'}); y += 12;
-  T('AMOUNT IN WORDS', M, y, {s: 7.5, c: 90, b: 1}); y += 5;
-  doc.setFontSize(9.5); const wl = doc.splitTextToSize(rec.words || '', W); T(wl, M, y, {b: 1}); y += wl.length * 4.6 + 5;
-  // bank row
-  const cols = [['BANK', bankName(acct.bank) + (acct.branch ? ' · ' + acct.branch : '')], ['ACCOUNT NO.', acct.number || ''], ['CHECK NO.', rec.noStr], ['CHECK DATE', fmtDate(rec.date, 'MM/DD/YYYY')]];
-  const cw = [W * .4, W * .22, W * .2, W * .18]; let x = M;
-  doc.rect(M, y, W, 13); cols.forEach((c, i) => { if (i) doc.line(x, y, x, y + 13); T(c[0], x + 2, y + 4.5, {s: 7, c: 90, b: 1}); doc.setFontSize(9); T(doc.splitTextToSize(c[1], cw[i] - 4)[0], x + 2, y + 10); x += cw[i]; }); y += 19;
-  // entries
+  T('PARTICULARS:', M, y, {b: 1}); y += 3;
+  const pl = wrap(rec.particulars || '', W - 6, 8.5); const ph = Math.max(17, pl.length * 3.7 + 6);
+  doc.rect(M, y, W, ph); T(pl, M + 3, y + 5); y += ph + 5;
+  // accounting entries (only when entered)
   const ent = (rec.entries || []).filter(e => e.acct || e.dr || e.cr);
   if (ent.length) {
-    T('ACCOUNTING ENTRIES', M, y, {s: 7.5, c: 90, b: 1}); y += 3;
-    doc.rect(M, y, W, 7); doc.line(R - 60, y, R - 60, y + 7 + ent.length * 6.5 + 7); doc.line(R - 30, y, R - 30, y + 7 + ent.length * 6.5 + 7);
-    T('ACCOUNT TITLE', M + 2, y + 4.8, {b: 1, s: 8}); T('DEBIT', R - 32, y + 4.8, {b: 1, s: 8, a: 'right'}); T('CREDIT', R - 2, y + 4.8, {b: 1, s: 8, a: 'right'}); y += 7;
-    let td = 0, tc = 0;
-    for (const e of ent) { doc.rect(M, y, W, 6.5); T(e.acct, M + 2, y + 4.5); if (+e.dr) T(peso(e.dr), R - 32, y + 4.5, {a: 'right'}); if (+e.cr) T(peso(e.cr), R - 2, y + 4.5, {a: 'right'}); td += +e.dr || 0; tc += +e.cr || 0; y += 6.5; }
-    doc.rect(M, y, W, 7); T('TOTAL', R - 62, y + 4.8, {b: 1, s: 8, a: 'right'}); T(peso(td), R - 32, y + 4.8, {b: 1, a: 'right'}); T(peso(tc), R - 2, y + 4.8, {b: 1, a: 'right'}); y += 13;
+    T('ACCOUNTING ENTRIES:', M, y, {b: 1}); y += 2.5;
+    const rh = 5.5, c1 = R - 70, c2 = R - 35; let td = 0, tc = 0;
+    doc.rect(M, y, W, rh); T('Account Title', M + 3, y + 3.8, {b: 1, s: 7.5}); T('Debit', c2 - 2, y + 3.8, {b: 1, s: 7.5, a: 'right'}); T('Credit', R - 2, y + 3.8, {b: 1, s: 7.5, a: 'right'});
+    doc.line(c1, y, c1, y + rh * (ent.length + 2)); doc.line(c2, y, c2, y + rh * (ent.length + 2)); y += rh;
+    for (const e of ent) { doc.rect(M, y, W, rh); T(wrap(e.acct, c1 - M - 4)[0] || '', M + 3, y + 3.8); if (+e.dr) T(peso(e.dr), c2 - 2, y + 3.8, {a: 'right'}); if (+e.cr) T(peso(e.cr), R - 2, y + 3.8, {a: 'right'}); td += +e.dr || 0; tc += +e.cr || 0; y += rh; }
+    doc.rect(M, y, W, rh); T('Total', c1 - 2, y + 3.8, {b: 1, a: 'right'}); T(peso(td), c2 - 2, y + 3.8, {b: 1, a: 'right'}); T(peso(tc), R - 2, y + 3.8, {b: 1, a: 'right'}); y += rh + 5;
   }
-  // signatories
-  y = Math.max(y + 6, 200);
-  const sig = [['Prepared by', co.prepared], ['Checked by', co.checked], ['Approved by', co.approved]]; const sw = W / 3;
-  sig.forEach((g, i) => { const sx = M + i * sw; T(g[0], sx, y, {s: 8, c: 90}); doc.line(sx, y + 12, sx + sw - 8, y + 12); T(g[1] || '', sx, y + 16, {s: 9, b: 1}); });
-  y += 26; doc.setLineWidth(0.25); doc.rect(M, y, W, 34);
-  doc.setFontSize(8.5); const rcv = doc.splitTextToSize(`RECEIVED from ${co.name || 'the company'} the sum of ${rec.words || ''} (PHP ${peso(rec.amount)}) in payment of the above.`, W - 6);
-  T(rcv, M + 3, y + 6, {s: 8.5});
-  doc.line(M + 3, y + 26, M + 95, y + 26); T('Signature over printed name', M + 3, y + 30, {s: 7.5, c: 90});
-  doc.line(R - 60, y + 26, R - 3, y + 26); T('Date received', R - 60, y + 30, {s: 7.5, c: 90});
-  T(`Check ${rec.noStr} · ${bankName(acct.bank)} ${acct.number || ''}`, M, 272, {s: 7, c: 120});
+  // approval signatures
+  T('APPROVAL SIGNATURES:', M, y, {b: 1}); y += 2.5;
+  const sw = W / 3, hh = 5.5, bh = 14, fh = 5.5, creator = userName(rec.createdByName || rec.createdBy);
+  const sig = [['Prepared by:', co.prepared || creator, 'Creator'], ['Reviewed by:', co.checked, 'Reviewer'], ['Approved by:', co.approved, 'Approver']];
+  doc.rect(M, y, W, hh + bh + fh); doc.line(M, y + hh, R, y + hh); doc.line(M, y + hh + bh, R, y + hh + bh);
+  sig.forEach(([h, name, role], i) => {
+    const x = M + i * sw; if (i) doc.line(x, y, x, y + hh + bh + fh);
+    T(h, x + sw / 2, y + 3.8, {b: 1, s: 7.5, a: 'center'});
+    const ly = i === 0 && !co.prepared ? y + hh + 2.5 : y + hh + bh - 4.5;
+    doc.setLineWidth(0.2); doc.line(x + 1.5, ly, x + sw - 1.5, ly); doc.setLineWidth(0.3);
+    T(wrap((name || '').toUpperCase(), sw - 4, 7.5)[0] || '', x + 2, ly + 3.4, {s: 7.5});
+    if (i === 0 && !co.prepared && rec.createdAt) { T('Issued in Check Printer', x + 2, ly + 7, {s: 6.5, c: 60}); T('Date/Time: ' + new Date(rec.createdAt).toLocaleString('en-PH', {dateStyle: 'medium', timeStyle: 'short'}), x + 2, ly + 9.8, {s: 6, c: 90, i: 1}); }
+    T(role, x + sw / 2, y + hh + bh + 3.8, {s: 7.5, i: 1, a: 'center'});
+  });
+  y += hh + bh + fh + 4; doc.setLineWidth(0.2); doc.line(M, y, R, y); y += 3.5;
+  T('This document is not valid for claiming Input Tax', 105, y, {s: 6.5, c: 100, a: 'center'});
+  T('Print Date/Time: ' + new Date().toLocaleString('en-PH', {month: '2-digit', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'}), 105, y + 2.8, {s: 6.5, c: 100, a: 'center'});
   return doc.output('blob');
 }
 
