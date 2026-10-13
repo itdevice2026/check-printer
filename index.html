@@ -762,7 +762,7 @@ function renderWrite(force) {
     mounted.write = true;
     el.innerHTML = `<div class="split">
       <form id="wf" class="card form" autocomplete="off" novalidate>
-        <div class="sec-head"><h2>New check</h2><div class="actions"><span class="hint" id="w-series"></span><button type="button" class="btn sm" id="w-clear-top" title="Clear payee, amount, words, CV no., particulars and entries">Clear form</button></div></div>
+        <div class="sec-head"><h2>New check</h2><div class="actions"><span class="hint" id="w-series"></span><label class="inline" style="font-weight:600"><input type="checkbox" id="w-ac"> Cross: A/C PAYEE ONLY</label><button type="button" class="btn sm" id="w-clear-top" title="Clear payee, amount, words, CV no., particulars and entries">Clear form</button></div></div>
         <label class="f">Bank account<select id="w-acct"></select></label>
         <div class="row">
           <label class="f"><span>Check no. <span class="req" title="Required">*</span></span><input id="w-no" class="mono" inputmode="numeric" required aria-required="true"></label>
@@ -774,10 +774,7 @@ function renderWrite(force) {
           <div class="sec-head"><span class="hint" style="font-weight:500">Amount in words</span><label class="inline hint"><input type="checkbox" id="w-wm"> Edit manually</label></div>
           <textarea id="w-words" rows="3" readonly></textarea>
         </div>
-        <div class="row">
-          <label class="f">CV no.<span class="clr-wrap"><input id="w-cv" class="mono" placeholder="Auto"><button type="button" class="clr" data-clear="cvNo" aria-label="Reset CV number to automatic" title="Reset to automatic">×</button></span></label>
-          <label class="inline" style="align-self:end;padding-bottom:8px"><input type="checkbox" id="w-ac"> Cross: A/C PAYEE ONLY</label>
-        </div>
+        <label class="f">CV no.<span class="clr-wrap"><input id="w-cv" class="mono" placeholder="Auto"><button type="button" class="clr" data-clear="cvNo" aria-label="Reset CV number to automatic" title="Reset to automatic">×</button></span></label>
         <label class="f">Particulars (voucher)<span class="clr-wrap ta"><textarea id="w-part" rows="3" placeholder="e.g. Payment for Invoice #1234, delivery of frozen pork cuts"></textarea><button type="button" class="clr" data-clear="particulars" aria-label="Clear particulars" title="Clear">×</button></span></label>
         <details id="w-vd" open><summary>Check voucher details</summary>
           <div class="form" style="margin-top:8px">
