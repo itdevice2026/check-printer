@@ -7,7 +7,11 @@ const CP_CONFIG = window.CP_CONFIG || {};
 // Per-customer branding (set in config.js > brand). Defaults are neutral.
 const CP_BRAND = Object.assign({appTitle: 'Check Printer', name: 'Check Printer', tagline: '', emailPlaceholder: 'name@company.com', usersHint: 'New people sign in with their company email and password, or press Create account on the sign-in page.'}, CP_CONFIG.brand || {});
 document.title = CP_BRAND.appTitle;
-const SB = window.supabase.createClient(CP_CONFIG.supabaseUrl, CP_CONFIG.supabaseKey, {auth: {persistSession: true, autoRefreshToken: true}});
+// Own sign-in storage: other Meatplus apps on the same website use the same Supabase project, and sharing one stored
+// session let them sign the Check Printer user out (or in as someone else) while records were loading.
+const SB = window.supabase.createClient(CP_CONFIG.supabaseUrl, CP_CONFIG.supabaseKey, {auth: {persistSession: true, autoRefreshToken: true, storageKey: 'cp-check-printer-auth'}});
+// Sign out of the Check Printer only, not of the other Meatplus apps.
+const cpSignOut = () => SB.auth.signOut({scope: 'local'});
 let CP_SESSION = null, CP_ROLE = null, CP_USERS = [], CP_CHANNEL = null, CP_PAYEES = [];
 
 // The all-banks print font is kept as a settings row in cp_layouts (admins only can write it; it is never shown as a layout).
@@ -185,7 +189,7 @@ function showNewPassword(forced) {
     <label class="f">Repeat new password<input id="cp-np2" type="password" autocomplete="new-password" minlength="8" required></label>
     <div id="cp-npmsg"></div>
     <div class="actions"><button class="btn primary" id="cp-npgo">Save password</button><button type="button" class="btn" id="cp-npout">Sign out</button></div></form>`);
-  $('#cp-npout').addEventListener('click', () => SB.auth.signOut());
+  $('#cp-npout').addEventListener('click', () => cpSignOut());
   $('#cp-np').addEventListener('submit', async e => {
     e.preventDefault(); const p1 = $('#cp-np1').value, p2 = $('#cp-np2').value, m = t => $('#cp-npmsg').innerHTML = `<div class="msg bad">${esc(t)}</div>`;
     if (p1.length < 8) return m('Use at least 8 characters.'); if (p1 !== p2) return m('The two passwords do not match.');
@@ -198,7 +202,7 @@ function showNewPassword(forced) {
 }
 function showNoAccess(email) {
   gate(`<div class="card form cp-login">${brandHtml}<div class="msg warn"><b>${esc(email)}</b> is not on the Check Printer user list. Ask the administrator to add you, then reload this page.</div><div class="actions"><button class="btn" id="cp-out2">Sign out</button></div></div>`);
-  $('#cp-out2').addEventListener('click', () => SB.auth.signOut());
+  $('#cp-out2').addEventListener('click', () => cpSignOut());
 }
 
 /* ---------- licensing: Program Key (System Developed By: Nomer Sta Ana) ---------- */
@@ -257,7 +261,7 @@ function showActivate(lic) {
     const req = licRequest(lic, co), ta = $('#cp-rtext'); ta.value = req; ta.hidden = false;
     if (!await copyText(req, 'Activation request copied. Send it to the developer.')) { ta.focus(); ta.select(); toast('Select the request text and copy it.', 'warn'); }
   });
-  $('#cp-out3').addEventListener('click', () => SB.auth.signOut());
+  $('#cp-out3').addEventListener('click', () => cpSignOut());
   $('#cp-actf')?.addEventListener('submit', async e => {
     e.preventDefault(); const key = $('#cp-key').value.trim(), b = $('#cp-actgo');
     if (!key) { $('#cp-actmsg').innerHTML = `<div class="msg bad">Paste the Program Key first.</div>`; $('#cp-key').focus(); return; }
@@ -526,7 +530,7 @@ const _renderTop = renderTop;
 renderTop = function () {
   _renderTop();
   const chip = $('#store-chip'); chip.className = 'chip cloud'; chip.textContent = 'Online'; chip.title = 'Saved to the online database. Everyone on the user list sees changes live.';
-  if (!$('#cp-me')) chip.insertAdjacentHTML('afterend', `<span id="cp-me" class="hint"></span><button class="btn sm" id="cp-out">Sign out</button>`), $('#cp-out').addEventListener('click', () => SB.auth.signOut());
+  if (!$('#cp-me')) chip.insertAdjacentHTML('afterend', `<span id="cp-me" class="hint"></span><button class="btn sm" id="cp-out">Sign out</button>`), $('#cp-out').addEventListener('click', () => cpSignOut());
   $('#cp-me').textContent = CP_SESSION?.user?.email || '';
 };
 
@@ -544,7 +548,9 @@ async function startInner() {
   const {data: me, error} = await SB.from('cp_allowed_users').select('*').eq('email', email).maybeSingle();
   if (error || !me || !me.active) { showNoAccess(email); return; }
   CP_ROLE = me.role;
-  try { await loadAll(); } catch (e) { gate(`<div class="card form cp-login">${brandHtml}<div class="msg bad">Could not load records: ${esc(e.message)}</div><div class="actions"><button class="btn" onclick="location.reload()">Try again</button></div></div>`); return; }
+  try { await loadAll(); } catch (e) {
+    if (['42501', 'PGRST301', 'PGRST303'].includes(e.code)) { CP_STARTED = false; await cpSignOut().catch(() => {}); showLogin('Your sign-in ended before the records loaded (another Meatplus app may have signed you out). Please sign in again.', 'warn'); return; }
+    gate(`<div class="card form cp-login">${brandHtml}<div class="msg bad">Could not load records: ${esc(e.message)}</div><div class="actions"><button class="btn" onclick="location.reload()">Try again</button></div></div>`); return; }
   DB = SB; CP_STARTED = true;
   for (const k in mounted) delete mounted[k];
   gate(''); renderAll(true);
