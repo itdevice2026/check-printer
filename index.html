@@ -320,11 +320,11 @@ const PFONT = {helvetica: ['helvetica', 'Helvetica, Arial, sans-serif'], courier
 const FONT_OPTS = [['helvetica', 'Helvetica (clean)'], ['courier', 'Courier (typewriter)'], ['times', 'Times (serif)'], ['tahoma', 'Tahoma']];
 // One print font for every bank: set by an administrator (Layouts > Print font, all banks). Empty = each layout's own font.
 // Bold print is also one setting for every bank, off by default.
-const PRINT = {font: '', bold: false};
-function loadPrintSettings() { const v = lsGet('cp-print-settings', null); if (v && typeof v === 'object') { PRINT.font = v.font || ''; PRINT.bold = !!v.bold; } }
-async function savePrintSettings(upd) { Object.assign(PRINT, upd); lsSet('cp-print-settings', {font: PRINT.font, bold: PRINT.bold}); }
+const PRINT = {font: '', bold: false, heavy: false};
+function loadPrintSettings() { const v = lsGet('cp-print-settings', null); if (v && typeof v === 'object') { PRINT.font = v.font || ''; PRINT.bold = !!v.bold; PRINT.heavy = !!v.heavy; } }
+async function savePrintSettings(upd) { Object.assign(PRINT, upd); lsSet('cp-print-settings', {font: PRINT.font, bold: PRINT.bold, heavy: PRINT.heavy}); }
 const effBold = () => !!PRINT.bold;
-const effFont = L => (PRINT.font && PFONT[PRINT.font]) ? PRINT.font : (PFONT[L.font] ? L.font : 'helvetica');
+const effFont = () => (PRINT.font && PFONT[PRINT.font]) ? PRINT.font : 'helvetica'; // one font for every bank
 const pf = L => PFONT[effFont(L)];
 // Tahoma is a Windows font, so it is not shipped with the site: each PC loads its own C:\Windows\Fonts\tahoma.ttf (and tahomabd.ttf
 // for bold) once; the bytes are kept in this browser (IndexedDB) and embedded in each PDF.
@@ -531,7 +531,7 @@ function drawItems(doc, L, items, ox, oy) {
     }
     pdfFont(doc, L); doc.setFontSize(it.size);
     // Extra dark: outline each letter as well as filling it, so thin strokes don't break up on a dot-matrix printer.
-    const o = {}; if (it.align === 'center' || it.align === 'right') o.align = it.align; if (L.heavy) { doc.setLineWidth(0.07); doc.setDrawColor(0); o.renderingMode = 'fillThenStroke'; }
+    const o = {}; if (it.align === 'center' || it.align === 'right') o.align = it.align; if (PRINT.heavy) { doc.setLineWidth(0.07); doc.setDrawColor(0); o.renderingMode = 'fillThenStroke'; }
     doc.text(it.text, ox + it.x * sx, oy + it.y * sy, o);
   }
 }
@@ -1309,10 +1309,10 @@ function renderLayouts(force) {
           <button class="btn" id="l-cal" type="button">Apply ruler</button>
         </div>
         <p class="hint" style="margin:0">If the date digits drift out of their boxes one after another (or the amount runs long or short), the printer is scaling the print. Print the <b>Alignment test PDF</b> at Actual size, measure the X ruler from 0 to 180 and the Y ruler from 0 to 50 with a ruler, type the numbers above and click <b>Apply ruler</b>, then Save layout.</p>
-        <div class="mini" style="align-items:end"><label class="f">Print font (all banks)<select id="g-font" ${canEditLayouts() ? '' : 'disabled'} title="Applies to every bank's checks, including locked layouts">${PRINT.font ? '' : `<option value="" selected>Each layout's own (${esc(PFONT[L.font] ? FONT_OPTS.find(o => o[0] === L.font)[1] : 'Helvetica')})</option>`}${FONT_OPTS.map(([v, t]) => `<option value="${v}" ${PRINT.font === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
-          <div class="actions" style="margin:0"><label class="inline"><input type="checkbox" id="g-bold" ${PRINT.bold ? 'checked' : ''} ${canEditLayouts() ? '' : 'disabled'}> Bold print (all banks)</label>${inp('heavy', 'Extra dark (dot-matrix)', 'chk')}</div></div>
+        <div class="mini" style="align-items:end"><label class="f">Print font (all banks)<select id="g-font" ${canEditLayouts() ? '' : 'disabled'} title="Applies to every bank's checks, including locked layouts">${FONT_OPTS.map(([v, t]) => `<option value="${v}" ${effFont() === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+          <div class="actions" style="margin:0"><label class="inline"><input type="checkbox" id="g-bold" ${PRINT.bold ? 'checked' : ''} ${canEditLayouts() ? '' : 'disabled'}> Bold print (all banks)</label><label class="inline"><input type="checkbox" id="g-heavy" ${PRINT.heavy ? 'checked' : ''} ${canEditLayouts() ? '' : 'disabled'}> Extra dark (all banks)</label></div></div>
         ${effFont(L) === 'tahoma' && !tahomaReady() ? `<div class="msg warn" style="margin:0">${tahomaHint()}</div>` : effFont(L) === 'tahoma' ? `<p class="hint" style="margin:0">Tahoma is loaded on this PC${TAHOMA.bold ? '' : ' (regular only)'}. <a data-loadtahoma>Load again</a></p>` : ''}
-        <p class="hint" style="margin:0">The print font applies to every bank. Bold print is off by default and applies to every bank. If letters look thin or broken on the dot-matrix printer (Epson LX-310), tick <b>Bold print</b> or <b>Extra dark</b>, or try Courier, and set the printer's Print Quality to High (not Draft).</p>
+        <p class="hint" style="margin:0">The print font applies to every bank. Print font, Bold print and Extra dark apply to every bank. Bold is off by default. If letters look thin or broken on the dot-matrix printer (Epson LX-310), tick <b>Bold print</b> or <b>Extra dark</b>, or try Courier, and set the printer's Print Quality to High (not Draft).</p>
         <p class="hint" style="margin:0">Printer shift moves everything at once. Positive X moves right, positive Y moves down. Measure the error on a test print with a ruler and enter it here.</p>
       </div>
       ${Object.entries(FIELD_UI).map(([f, [label, extra]]) => `<div class="fgroup ${app.layoutSel === f ? 'on' : ''}" data-fg="${f}"><header><b>${label}</b>${inp(`fields.${f}.show`, 'Print', 'chk')}</header>
@@ -1342,6 +1342,12 @@ function renderLayouts(force) {
   $('#g-font')?.addEventListener('change', async e => {
     const v = e.target.value; if (!canEditLayouts()) return;
     try { await savePrintSettings({font: v}); audit('Changed print font', `All banks: ${FONT_OPTS.find(o => o[0] === v)?.[1] || 'each layout\u2019s own'}`); toast(`Print font for all banks: ${FONT_OPTS.find(o => o[0] === v)?.[1] || 'each layout\u2019s own'}.`); }
+    catch (err) { writeErr(err); }
+    mounted.layouts = false; renderAll(true);
+  });
+  $('#g-heavy')?.addEventListener('change', async e => {
+    const v = e.target.checked; if (!canEditLayouts()) return;
+    try { await savePrintSettings({heavy: v}); audit('Changed extra dark print', `All banks: ${v ? 'on' : 'off'}`); toast(`Extra dark print for all banks: ${v ? 'on' : 'off'}.`); }
     catch (err) { writeErr(err); }
     mounted.layouts = false; renderAll(true);
   });
