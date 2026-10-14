@@ -802,15 +802,16 @@ function renderAll(force) {
 }
 
 /* ---------- FONTS (one print font for every bank) ---------- */
-// Everyone can see this tab and load Tahoma on their own PC; only administrators can change the settings.
+// Every user on the list can change the print font settings (they apply to everyone and every bank) and load Tahoma on their own PC.
+const canEditFonts = () => true;
 async function setPrintSetting(upd, label, value) {
-  if (!canEditLayouts()) return;
+  if (!canEditFonts()) return;
   try { await savePrintSettings(upd); audit('Changed ' + label, 'All banks: ' + value); toast(`${label[0].toUpperCase() + label.slice(1)} for all banks: ${value}.`); }
   catch (err) { writeErr(err); }
   mounted.layouts = false; renderFonts();
 }
 function renderFonts() {
-  const el = $('#tab-fonts'); const admin = canEditLayouts(), f = effFont();
+  const el = $('#tab-fonts'); const admin = canEditFonts(), f = effFont();
   const accts = accountList(); app.fontBank ??= accts[0]?.id || 'std-BDO';
   const acct = S.accounts[app.fontBank]; const L = acct ? getLayout(acct.layoutId || 'std-' + acct.bank) : getLayout('std-BDO');
   const sd = {...sampleData(L), ...(acct ? {acctNo: acct.number, acctName: acct.name, branch: acct.branch, brstn: (acct.brstn || '').replace(/\D/g, '')} : {})};
@@ -818,7 +819,7 @@ function renderFonts() {
   el.innerHTML = `<div class="split">
     <div class="card form">
       <h2>Print font</h2>
-      <p class="hint" style="margin:0">These settings apply to <b>every bank's checks</b>, including locked layouts. ${admin ? '' : 'Only an administrator can change them.'}</p>
+      <p class="hint" style="margin:0">These settings apply to <b>every bank's checks</b>, including locked layouts. Any user can change them; each change is recorded in the audit log.</p>
       <div class="font-opts" role="radiogroup" aria-label="Print font">
         ${FONT_OPTS.map(([v, t]) => `<label class="font-opt${f === v ? ' on' : ''}"><input type="radio" name="g-font" value="${v}" ${f === v ? 'checked' : ''} ${admin ? '' : 'disabled'}><span><b>${t}</b>${sample(v)}</span></label>`).join('')}
       </div>
