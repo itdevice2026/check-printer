@@ -67,9 +67,15 @@ input[aria-invalid="true"]{border-color:var(--bad)!important;box-shadow:0 0 0 3p
 
 /* forms */
 .card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px}
+.font-opts{display:grid;gap:8px}
+.font-opt{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:8px;padding:10px 12px;cursor:pointer}
+.font-opt.on{border-color:var(--accent, #2f6f4f);box-shadow:0 0 0 1px var(--accent, #2f6f4f) inset}
+.font-opt input{margin-top:3px;width:16px;height:16px;flex:none;accent-color:var(--accent)}
+.font-opt>span{min-width:0;flex:1}
+.font-sample{font-size:14px;color:var(--ink, inherit);margin-top:4px;overflow-wrap:anywhere}
 .form{display:flex;flex-direction:column;gap:12px}
 label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:500;color:var(--muted);min-width:0}
-input:not([type=checkbox]):not([type=file]),select,textarea{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:7px 9px;color:var(--ink);font-size:14px;width:100%;min-width:0}
+input:not([type=checkbox]):not([type=radio]):not([type=file]),select,textarea{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:7px 9px;color:var(--ink);font-size:14px;width:100%;min-width:0}
 textarea{resize:vertical}
 input[readonly],textarea[readonly]{background:var(--surface-2)}
 input.big{font-family:var(--mono);font-size:18px;font-weight:500}
@@ -198,6 +204,7 @@ table.t tr.voidrow td{background:var(--bad-soft)}
     <button role="tab" data-tab="register">Register &amp; reports</button>
     <button role="tab" data-tab="accounts">Bank accounts</button>
     <button role="tab" data-tab="layouts">Layouts &amp; calibration</button>
+    <button role="tab" data-tab="fonts">Fonts</button>
     <button role="tab" data-tab="companies">Companies &amp; audit</button>
   </nav>
   <main>
@@ -205,6 +212,7 @@ table.t tr.voidrow td{background:var(--bad-soft)}
     <section id="tab-register" data-panel="register" hidden></section>
     <section id="tab-accounts" data-panel="accounts" hidden></section>
     <section id="tab-layouts" data-panel="layouts" hidden></section>
+    <section id="tab-fonts" data-panel="fonts" hidden></section>
     <section id="tab-companies" data-panel="companies" hidden></section>
   </main>
 </div>
@@ -343,7 +351,7 @@ function pickTahoma() {
       let bin = ''; for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
       await storeTahoma(/bd|bold/i.test(f.name) ? 'bold' : 'normal', btoa(bin)); n++;
     }
-    if (n) { toast(`Tahoma loaded on this PC${TAHOMA.bold ? '' : ' (regular only: also pick tahomabd.ttf for bold print)'}.`); renderAll(true); }
+    if (n) { mounted.layouts = false; toast(`Tahoma loaded on this PC${TAHOMA.bold ? '' : ' (regular only: also pick tahomabd.ttf for bold print)'}.`); renderAll(true); }
   };
   inpEl.click();
 }
@@ -788,8 +796,54 @@ function renderAll(force) {
   if (t === 'register') renderRegister();
   if (t === 'accounts') renderAccounts(!!force);
   if (t === 'layouts') renderLayouts(force);
+  if (t === 'fonts') renderFonts();
   if (t === 'companies') renderCompanies(!!force);
   $('#payees').innerHTML = [...new Set(allChecks().map(c => c.payee).filter(Boolean))].sort().slice(0, 400).map(p => `<option value="${esc(p)}">`).join('');
+}
+
+/* ---------- FONTS (one print font for every bank) ---------- */
+// Everyone can see this tab and load Tahoma on their own PC; only administrators can change the settings.
+async function setPrintSetting(upd, label, value) {
+  if (!canEditLayouts()) return;
+  try { await savePrintSettings(upd); audit('Changed ' + label, 'All banks: ' + value); toast(`${label[0].toUpperCase() + label.slice(1)} for all banks: ${value}.`); }
+  catch (err) { writeErr(err); }
+  mounted.layouts = false; renderFonts();
+}
+function renderFonts() {
+  const el = $('#tab-fonts'); const admin = canEditLayouts(), f = effFont();
+  const accts = accountList(); app.fontBank ??= accts[0]?.id || 'std-BDO';
+  const acct = S.accounts[app.fontBank]; const L = acct ? getLayout(acct.layoutId || 'std-' + acct.bank) : getLayout('std-BDO');
+  const sd = {...sampleData(L), ...(acct ? {acctNo: acct.number, acctName: acct.name, branch: acct.branch, brstn: (acct.brstn || '').replace(/\D/g, '')} : {})};
+  const sample = (v) => `<div class="font-sample" style="font-family:${PFONT[v][1].replace(/"/g, "'")};font-weight:${PRINT.bold ? 700 : 400}">JUAN DELA CRUZ TRADING · 125,430.50</div>`;
+  el.innerHTML = `<div class="split">
+    <div class="card form">
+      <h2>Print font</h2>
+      <p class="hint" style="margin:0">These settings apply to <b>every bank's checks</b>, including locked layouts. ${admin ? '' : 'Only an administrator can change them.'}</p>
+      <div class="font-opts" role="radiogroup" aria-label="Print font">
+        ${FONT_OPTS.map(([v, t]) => `<label class="font-opt${f === v ? ' on' : ''}"><input type="radio" name="g-font" value="${v}" ${f === v ? 'checked' : ''} ${admin ? '' : 'disabled'}><span><b>${t}</b>${sample(v)}</span></label>`).join('')}
+      </div>
+      <div class="actions" style="margin:0">
+        <label class="inline"><input type="checkbox" id="g-bold" ${PRINT.bold ? 'checked' : ''} ${admin ? '' : 'disabled'}> Bold print</label>
+        <label class="inline"><input type="checkbox" id="g-heavy" ${PRINT.heavy ? 'checked' : ''} ${admin ? '' : 'disabled'}> Extra dark (dot-matrix)</label>
+      </div>
+      <p class="hint" style="margin:0">Bold is off by default. If letters look thin or broken on the dot-matrix printer (Epson LX-310), tick <b>Bold print</b> or <b>Extra dark</b>, or try Courier, and set the printer's Print Quality to High (not Draft).</p>
+      <h2 style="margin-top:8px">Tahoma on this PC</h2>
+      ${tahomaReady() ? `<div class="msg good" style="margin:0">Tahoma is loaded on this PC${TAHOMA.bold ? ' (regular and bold)' : ' (regular only: also load tahomabd.ttf for bold print)'}. <a data-loadtahoma>Load again</a></div>`
+        : `<div class="msg ${f === 'tahoma' ? 'warn' : 'info'}" style="margin:0">${tahomaHint()}</div>`}
+      <p class="hint" style="margin:0">Tahoma is a Windows font, so every PC that prints checks loads it once from its own <span class="mono">C:\\Windows\\Fonts</span> folder. It stays in that PC's browser.</p>
+    </div>
+    <div class="card">
+      <div class="leaf-head"><h3>Preview</h3>${accts.length ? `<label class="inline" style="font-size:13px">Bank <select id="f-bank">${accts.map(a => `<option value="${a.id}" ${a.id === app.fontBank ? 'selected' : ''}>${esc(acctLabel(a))}</option>`).join('')}</select></label>` : ''}</div>
+      <div class="leaf">${leafSVG(L, sd)}</div>
+      <div class="actions"><button class="btn" id="f-pdf" type="button">Sample PDF</button></div>
+      <p class="hint" style="margin:0">The preview uses this PC's screen fonts; the Sample PDF shows exactly what prints.</p>
+    </div>
+  </div>`;
+  el.querySelectorAll('input[name="g-font"]').forEach(r => r.addEventListener('change', e => setPrintSetting({font: e.target.value}, 'print font', FONT_OPTS.find(o => o[0] === e.target.value)[1])));
+  $('#g-bold')?.addEventListener('change', e => setPrintSetting({bold: e.target.checked}, 'bold print', e.target.checked ? 'on' : 'off'));
+  $('#g-heavy')?.addEventListener('change', e => setPrintSetting({heavy: e.target.checked}, 'extra dark print', e.target.checked ? 'on' : 'off'));
+  $('#f-bank')?.addEventListener('change', e => { app.fontBank = e.target.value; renderFonts(); });
+  $('#f-pdf')?.addEventListener('click', () => saveFile(`Font-sample-${f}.pdf`, checkPdf(L, {...sd, acctNo: acct?.number || sd.acctNo}, true)));
 }
 
 /* ---------- WRITE CHECK ---------- */
@@ -1309,10 +1363,7 @@ function renderLayouts(force) {
           <button class="btn" id="l-cal" type="button">Apply ruler</button>
         </div>
         <p class="hint" style="margin:0">If the date digits drift out of their boxes one after another (or the amount runs long or short), the printer is scaling the print. Print the <b>Alignment test PDF</b> at Actual size, measure the X ruler from 0 to 180 and the Y ruler from 0 to 50 with a ruler, type the numbers above and click <b>Apply ruler</b>, then Save layout.</p>
-        <div class="mini" style="align-items:end"><label class="f">Print font (all banks)<select id="g-font" ${canEditLayouts() ? '' : 'disabled'} title="Applies to every bank's checks, including locked layouts">${FONT_OPTS.map(([v, t]) => `<option value="${v}" ${effFont() === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
-          <div class="actions" style="margin:0"><label class="inline"><input type="checkbox" id="g-bold" ${PRINT.bold ? 'checked' : ''} ${canEditLayouts() ? '' : 'disabled'}> Bold print (all banks)</label><label class="inline"><input type="checkbox" id="g-heavy" ${PRINT.heavy ? 'checked' : ''} ${canEditLayouts() ? '' : 'disabled'}> Extra dark (all banks)</label></div></div>
-        ${effFont(L) === 'tahoma' && !tahomaReady() ? `<div class="msg warn" style="margin:0">${tahomaHint()}</div>` : effFont(L) === 'tahoma' ? `<p class="hint" style="margin:0">Tahoma is loaded on this PC${TAHOMA.bold ? '' : ' (regular only)'}. <a data-loadtahoma>Load again</a></p>` : ''}
-        <p class="hint" style="margin:0">The print font applies to every bank. Print font, Bold print and Extra dark apply to every bank. Bold is off by default. If letters look thin or broken on the dot-matrix printer (Epson LX-310), tick <b>Bold print</b> or <b>Extra dark</b>, or try Courier, and set the printer's Print Quality to High (not Draft).</p>
+        <p class="hint" style="margin:0">Print font: <b>${esc(FONT_OPTS.find(o => o[0] === effFont())[1])}</b> · Bold ${PRINT.bold ? 'on' : 'off'} · Extra dark ${PRINT.heavy ? 'on' : 'off'} (all banks). <a data-go="fonts">Change in Fonts</a></p>
         <p class="hint" style="margin:0">Printer shift moves everything at once. Positive X moves right, positive Y moves down. Measure the error on a test print with a ruler and enter it here.</p>
       </div>
       ${Object.entries(FIELD_UI).map(([f, [label, extra]]) => `<div class="fgroup ${app.layoutSel === f ? 'on' : ''}" data-fg="${f}"><header><b>${label}</b>${inp(`fields.${f}.show`, 'Print', 'chk')}</header>
@@ -1339,24 +1390,6 @@ function renderLayouts(force) {
   $('#l-pick').addEventListener('change', e => { app.layoutId = e.target.value; app.layoutDraft = null; renderLayouts(true); });
   if (!el._bound) { el._bound = true; el.addEventListener('input', layoutInput); el.addEventListener('change', layoutInput); }
   if (locked) el.querySelectorAll('[data-p], #l-mx, #l-my, #l-cal').forEach(i => { i.disabled = true; });
-  $('#g-font')?.addEventListener('change', async e => {
-    const v = e.target.value; if (!canEditLayouts()) return;
-    try { await savePrintSettings({font: v}); audit('Changed print font', `All banks: ${FONT_OPTS.find(o => o[0] === v)?.[1] || 'each layout\u2019s own'}`); toast(`Print font for all banks: ${FONT_OPTS.find(o => o[0] === v)?.[1] || 'each layout\u2019s own'}.`); }
-    catch (err) { writeErr(err); }
-    mounted.layouts = false; renderAll(true);
-  });
-  $('#g-heavy')?.addEventListener('change', async e => {
-    const v = e.target.checked; if (!canEditLayouts()) return;
-    try { await savePrintSettings({heavy: v}); audit('Changed extra dark print', `All banks: ${v ? 'on' : 'off'}`); toast(`Extra dark print for all banks: ${v ? 'on' : 'off'}.`); }
-    catch (err) { writeErr(err); }
-    mounted.layouts = false; renderAll(true);
-  });
-  $('#g-bold')?.addEventListener('change', async e => {
-    const v = e.target.checked; if (!canEditLayouts()) return;
-    try { await savePrintSettings({bold: v}); audit('Changed bold print', `All banks: ${v ? 'on' : 'off'}`); toast(`Bold print for all banks: ${v ? 'on' : 'off'}.`); }
-    catch (err) { writeErr(err); }
-    mounted.layouts = false; renderAll(true);
-  });
   $('#l-unlock')?.addEventListener('click', () => setLayoutLock(false));
   $('#l-lock')?.addEventListener('click', () => { if (app.layoutDirty) { $('#l-msg').innerHTML = `<div class="msg warn">Save layout first, then lock it.</div>`; return; } setLayoutLock(true); });
   $('#l-save')?.addEventListener('click', () => saveLayout(false));
@@ -1525,7 +1558,7 @@ async function doImport() {
 
 /* ---------- boot ---------- */
 (function boot() {
-  const h = (location.hash || '').slice(1); if (['write','register','accounts','layouts','companies'].includes(h)) app.tab = h;
+  const h = (location.hash || '').slice(1); if (['write','register','accounts','layouts','fonts','companies'].includes(h)) app.tab = h;
   const local = lsGet(LSKEY, null); if (local) for (const c of COLS) S[c] = local[c] || {};
   loadPrintSettings();
   renderAll(true);
