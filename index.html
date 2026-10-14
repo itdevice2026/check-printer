@@ -220,6 +220,13 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const clone = o => JSON.parse(JSON.stringify(o ?? null));
 const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+const PH_TZ = 'Asia/Manila';
+function phTime(ts, withTime = true) {
+  if (!ts) return '';
+  const d = new Date(ts); if (isNaN(d)) return String(ts).slice(0, withTime ? 16 : 10).replace('T', ' ');
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {timeZone: PH_TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}).formatToParts(d).map(x => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}` + (withTime ? ` ${p.hour}:${p.minute}` : '');
+}
 const peso = n => (Number(n) || 0).toLocaleString('en-PH', {minimumFractionDigits: 2, maximumFractionDigits: 2});
 const parseAmt = s => { const n = parseFloat(String(s ?? '').replace(/[^0-9.]/g, '')); return isFinite(n) ? Math.round(n * 100) / 100 : 0; };
 const r1 = v => Math.round(v * 10) / 10;
@@ -582,12 +589,12 @@ function voucherPdf(rec) {
     const ly = i === 0 && !co.prepared ? y + hh + 2.5 : y + hh + bh - 4.5;
     doc.setLineWidth(0.2); doc.line(x + 1.5, ly, x + sw - 1.5, ly); doc.setLineWidth(0.3);
     T(wrap((name || '').toUpperCase(), sw - 4, 7.5)[0] || '', x + 2, ly + 3.4, {s: 7.5});
-    if (i === 0 && !co.prepared && rec.createdAt) { T('Issued in Check Printer', x + 2, ly + 7, {s: 6.5, c: 60}); T('Date/Time: ' + new Date(rec.createdAt).toLocaleString('en-PH', {dateStyle: 'medium', timeStyle: 'short'}), x + 2, ly + 9.8, {s: 6, c: 90, i: 1}); }
+    if (i === 0 && !co.prepared && rec.createdAt) { T('Issued in Check Printer', x + 2, ly + 7, {s: 6.5, c: 60}); T('Date/Time: ' + new Date(rec.createdAt).toLocaleString('en-PH', {timeZone: PH_TZ, dateStyle: 'medium', timeStyle: 'short'}), x + 2, ly + 9.8, {s: 6, c: 90, i: 1}); }
     T(role, x + sw / 2, y + hh + bh + 3.8, {s: 7.5, i: 1, a: 'center'});
   });
   y += hh + bh + fh + 4; doc.setLineWidth(0.2); doc.line(M, y, R, y); y += 3.5;
   T('This document is not valid for claiming Input Tax', 105, y, {s: 6.5, c: 100, a: 'center'});
-  T('Print Date/Time: ' + new Date().toLocaleString('en-PH', {month: '2-digit', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'}), 105, y + 2.8, {s: 6.5, c: 100, a: 'center'});
+  T('Print Date/Time: ' + new Date().toLocaleString('en-PH', {timeZone: PH_TZ, month: '2-digit', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'}), 105, y + 2.8, {s: 6.5, c: 100, a: 'center'});
   return doc.output('blob');
 }
 
@@ -1153,7 +1160,7 @@ async function exportXlsx() {
   if (!window.XLSX) { toast('The Excel library did not load. Check your connection and reload.', 'bad'); return; }
   const rows = regRows();
   if (!rows.length) { toast('Nothing to export with these filters.', 'warn'); return; }
-  const data = rows.map(r => { const a = S.accounts[r.accountId] || {}; return {'Check No.': r.noStr, 'Check Date': r.date, 'Payee': r.payee, 'Amount': r.amount, 'Status': effStatus(r), 'Company': S.companies[r.companyId]?.name || '', 'Bank': bankName(a.bank), 'Account No.': a.number || '', 'CV No.': r.cvNo || '', 'Particulars': r.particulars || '', 'Amount in Words': r.words || '', 'A/C Payee': r.acPayee ? 'Yes' : '', 'Void Reason': r.voidReason || '', 'Issued At': (r.createdAt || '').slice(0, 16).replace('T', ' '), 'Released At': (r.releasedAt || '').slice(0, 10), 'Cleared At': (r.clearedAt || '').slice(0, 10), 'Times Printed': r.printed || 0}; });
+  const data = rows.map(r => { const a = S.accounts[r.accountId] || {}; return {'Check No.': r.noStr, 'Check Date': r.date, 'Payee': r.payee, 'Amount': r.amount, 'Status': effStatus(r), 'Company': S.companies[r.companyId]?.name || '', 'Bank': bankName(a.bank), 'Account No.': a.number || '', 'CV No.': r.cvNo || '', 'Particulars': r.particulars || '', 'Amount in Words': r.words || '', 'A/C Payee': r.acPayee ? 'Yes' : '', 'Void Reason': r.voidReason || '', 'Issued At': phTime(r.createdAt), 'Released At': (r.releasedAt || '').slice(0, 10), 'Cleared At': (r.clearedAt || '').slice(0, 10), 'Times Printed': r.printed || 0}; });
   const ws = XLSX.utils.json_to_sheet(data);
   ws['!cols'] = [14, 12, 34, 14, 11, 30, 26, 16, 16, 40, 60, 9, 30, 17, 12, 12, 8].map(w => ({wch: w}));
   const rng = XLSX.utils.decode_range(ws['!ref']); for (let R = 1; R <= rng.e.r; R++) { const c = ws[XLSX.utils.encode_cell({r: R, c: 3})]; if (c) c.z = '#,##0.00'; }
@@ -1234,7 +1241,7 @@ function renderLayouts(force) {
     return `<label class="f">${label}<input type="number" step="0.1" data-p="${path}" data-num="1" value="${esc(v)}"></label>`;
   };
   el.innerHTML = `${!admin ? `<div class="msg warn lock-note" style="margin-bottom:14px"><b>&#128274; Locked.</b> Only an administrator can change layouts and printer calibration. You can view the layouts and download alignment tests and sample checks.</div>`
-    : isLocked ? `<div class="msg warn lock-note" style="margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span><b>&#128274; This layout is locked (calibrated).</b> ${lk.lockedBy ? 'Locked by ' + esc(lk.lockedBy) : ''}${lk.lockedAt ? ' on ' + esc(fmtDate(String(lk.lockedAt).slice(0, 10), 'MMMM DD, YYYY')) : ''}. Unlock it to change positions or calibration.</span><button type="button" class="btn sm primary" id="l-unlock">Unlock layout</button></div>` : ''}<div class="split ${locked ? 'locked' : ''}" style="grid-template-columns:minmax(0,460px) minmax(0,1fr)">
+    : isLocked ? `<div class="msg warn lock-note" style="margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span><b>&#128274; This layout is locked (calibrated).</b> ${lk.lockedBy ? 'Locked by ' + esc(lk.lockedBy) : ''}${lk.lockedAt ? ' on ' + esc(fmtDate(phTime(lk.lockedAt, false), 'MMMM DD, YYYY')) : ''}. Unlock it to change positions or calibration.</span><button type="button" class="btn sm primary" id="l-unlock">Unlock layout</button></div>` : ''}<div class="split ${locked ? 'locked' : ''}" style="grid-template-columns:minmax(0,460px) minmax(0,1fr)">
     <div class="form">
       <div class="card form">
         <div class="sec-head"><h2>Layout</h2><span class="dirty" id="l-dirty">${app.layoutDirty ? 'Unsaved changes' : ''}</span></div>
@@ -1409,7 +1416,7 @@ function renderCompanies(force = true) {
     </div>
     <div><div class="sec-head" style="margin-bottom:10px"><h2>Audit log</h2><span class="hint">Latest ${entries.length} actions</span></div>
       <div class="table-wrap"><table class="t"><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Details</th></tr></thead><tbody>
-      ${entries.map(a => `<tr><td class="mono" style="white-space:nowrap">${esc(a.t.slice(0, 16).replace('T', ' '))}</td><td>${esc(profileNames[a.by] || a.byName || (a.by ? 'Member' : '—'))}</td><td>${esc(a.action)}</td><td>${esc(a.detail)}</td></tr>`).join('') || `<tr><td colspan="4" class="empty">Nothing logged yet.</td></tr>`}
+      ${entries.map(a => `<tr><td class="mono" style="white-space:nowrap">${esc(phTime(a.t))}</td><td>${esc(profileNames[a.by] || a.byName || (a.by ? 'Member' : '—'))}</td><td>${esc(a.action)}</td><td>${esc(a.detail)}</td></tr>`).join('') || `<tr><td colspan="4" class="empty">Nothing logged yet.</td></tr>`}
       </tbody></table></div></div></div>`;
   $('#c-new')?.addEventListener('click', () => { app.coEdit = {name: '', short: '', tin: '', address: '', cvPrefix: 'CV', cvNext: 1}; renderCompanies(); });
   $$('[data-cedit]').forEach(b => b.addEventListener('click', () => { app.coEdit = {...clone(S.companies[b.dataset.cedit]), id: b.dataset.cedit}; renderCompanies(); }));
