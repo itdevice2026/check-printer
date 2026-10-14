@@ -10,18 +10,27 @@ document.title = CP_BRAND.appTitle;
 const SB = window.supabase.createClient(CP_CONFIG.supabaseUrl, CP_CONFIG.supabaseKey, {auth: {persistSession: true, autoRefreshToken: true}});
 let CP_SESSION = null, CP_ROLE = null, CP_USERS = [], CP_CHANNEL = null, CP_PAYEES = [];
 
+// The all-banks print font is kept as a settings row in cp_layouts (admins only can write it; it is never shown as a layout).
+const PRINT_ROW = '_print-settings';
+savePrintFont = async function (font) {
+  const prev = PRINT.font; PRINT.font = font;
+  try { await must(SB.from('cp_layouts').upsert({id: PRINT_ROW, data: {font, settings: true}}).select().single()); }
+  catch (e) { PRINT.font = prev; throw e; }
+};
+
 /* ---------- row <-> app object mapping ---------- */
 const coFromRow = r => ({name: r.name, short: r.short, tin: r.tin, address: r.address, cvPrefix: r.cv_prefix, cvNext: r.cv_next, prepared: r.prepared, checked: r.checked, approved: r.approved, logo: r.logo || ''});
 const coToRow = (id, c) => ({id, name: c.name, short: c.short || '', tin: c.tin || '', address: c.address || '', cv_prefix: c.cvPrefix || 'CV', cv_next: +c.cvNext || 1, prepared: c.prepared || '', checked: c.checked || '', approved: c.approved || '', logo: c.logo || ''});
 const acFromRow = r => ({companyId: r.company_id, bank: r.bank, branch: r.branch, name: r.name, number: r.number, brstn: r.brstn, seriesFrom: +r.series_from, seriesTo: +r.series_to, nextNo: +r.next_no, digits: r.digits, layoutId: r.layout_id, active: r.active});
 const acToRow = (id, a) => ({id, company_id: a.companyId, bank: a.bank, branch: a.branch || '', name: a.name || '', number: a.number || '', brstn: a.brstn || '', series_from: +a.seriesFrom, series_to: +a.seriesTo, next_no: +a.nextNo, digits: +a.digits || 10, layout_id: a.layoutId || '', active: a.active !== false});
-const ckFromRow = r => ({_id: r.id, date: r.check_date, payee: r.payee, amount: Number(r.amount), words: r.words, particulars: r.particulars, cvNo: r.cv_no, acPayee: r.ac_payee, entries: r.entries || [], voucher: r.voucher || {}, status: r.status, voidReason: r.void_reason || '', printed: r.printed, companyId: r.company_id, createdAt: r.created_at, createdBy: r.created_by, createdByName: r.created_by_email, releasedAt: r.released_at, clearedAt: r.cleared_at, voidedAt: r.voided_at});
+const ckFromRow = r => ({_id: r.id, refId: r.ref_no || '', date: r.check_date, payee: r.payee, amount: Number(r.amount), words: r.words, particulars: r.particulars, cvNo: r.cv_no, acPayee: r.ac_payee, entries: r.entries || [], voucher: r.voucher || {}, status: r.status, voidReason: r.void_reason || '', printed: r.printed, companyId: r.company_id, createdAt: r.created_at, createdBy: r.created_by, createdByName: r.created_by_email, releasedAt: r.released_at, clearedAt: r.cleared_at, voidedAt: r.voided_at});
 const CK_FIELDS = {status: 'status', releasedAt: 'released_at', clearedAt: 'cleared_at', voidReason: 'void_reason', voidedAt: 'voided_at', printed: 'printed', particulars: 'particulars', cvNo: 'cv_no'};
 
 function applyRow(table, row, deleted) {
   if (!row) return;
   if (table === 'cp_companies') { const m = {...S.companies}; if (deleted) delete m[row.id]; else m[row.id] = coFromRow(row); S.companies = m; }
   else if (table === 'cp_accounts') { const m = {...S.accounts}; if (deleted) delete m[row.id]; else m[row.id] = acFromRow(row); S.accounts = m; }
+  else if (table === 'cp_layouts' && row.id === PRINT_ROW) { PRINT.font = deleted ? '' : (row.data?.font || ''); mounted.layouts = false; }
   else if (table === 'cp_layouts') { const m = {...S.layouts}; if (deleted) delete m[row.id]; else m[row.id] = row.data; S.layouts = m; if (!app.layoutDirty) app.layoutDraft = null; mounted.layouts = false; }
   else if (table === 'cp_checks') {
     const m = {...S.checks};
@@ -81,12 +90,12 @@ writeErr = function (e) { console.error(e); toast(e?.message || 'Could not save.
 /* ---------- operations that run on the server in one transaction ---------- */
 issueCheck = async function () {
   const d = app.draft; const {acct, L} = syncDraftAuto(); if (!acct) return;
-  const no = parseInt(d.no, 10); const data = writeData(d, acct);
-  if (!no || !data.amount || !data.payee) return;
+  const typedNo = parseInt(d.no, 10) > 0 ? parseInt(d.no, 10) : null; const data = writeData(d, acct);
+  if (!data.amount || !data.payee) return;
   const btn = $('#w-issue'); btn.disabled = true;
   let row;
   try {
-    row = await must(SB.rpc('cp_issue_check', {p_account_id: acct.id, p_check_no: no, p_check_date: d.date, p_payee: data.payee, p_amount: data.amount,
+    row = await must(SB.rpc('cp_issue_check', {p_account_id: acct.id, p_check_no: typedNo, p_check_date: d.date, p_payee: data.payee, p_amount: data.amount,
       p_words: d.words, p_particulars: d.particulars.trim(), p_cv_no: d.cvNo.trim(), p_cv_auto: !!d.cvAuto, p_ac_payee: !!d.acPayee,
       p_entries: d.entries.filter(x => x.acct || x.dr || x.cr).map(x => ({acct: x.acct, dr: parseAmt(x.dr), cr: parseAmt(x.cr)}))}));
   } catch (e) { writeErr(e); btn.disabled = false; return; }
@@ -96,7 +105,8 @@ issueCheck = async function () {
     try { row = await must(SB.from('cp_checks').update({voucher: vd}).eq('id', row.id).select().single()); } catch (e) { console.error(e); toast('Check saved, but the voucher details could not be stored: ' + e.message, 'warn'); }
   }
   applyRow('cp_checks', row);
-  const dg = typedDigits(d.no, acct); // keep the leading zeros the user typed for this account's check numbers
+  const no = +row.check_no; // the typed check number, or -N for an automatic reference number REF-N
+  const dg = typedNo ? typedDigits(d.no, acct) : 0; // keep the leading zeros the user typed for this account's check numbers
   if (dg) { try { await must(SB.from('cp_accounts').update({digits: dg}).eq('id', acct.id)); acct.digits = dg; } catch (e) { console.error(e); } }
   await refreshRows();
   const pm = findPayee(row.payee), upd = {};
@@ -106,7 +116,7 @@ issueCheck = async function () {
   const alsoV = d.alsoVoucher;
   app.draft = newDraft(acct.id); app.draft.alsoVoucher = alsoV; app.draft.date = d.date;
   fillWriteInputs(); updateWrite(true);
-  toast(`Check ${padNo(acct, no)} saved to the register.`);
+  toast(`Saved to the register: ${row.ref_no || padNo(acct, no)}${no > 0 ? ` (check #${padNo(acct, no)})` : ''}.`);
   const rec = ckFromRow(row); const full = {...rec, no, accountId: acct.id, noStr: padNo(acct, no)};
   await saveFile(`Check-${acct.bank}-${full.noStr}.pdf`, checkPdf(L, {...full, acctNo: acct.number}));
   if (alsoV) await saveFile(`Voucher-${rec.cvNo || full.noStr}.pdf`, voucherPdf(full));
@@ -139,7 +149,7 @@ async function loadAll() {
   const [cos, acs, lays, cks, au, users, pays] = await Promise.all([all('cp_companies', 'id'), all('cp_accounts', 'id'), all('cp_layouts', 'id'), all('cp_checks', 'id'),
     must(SB.from('cp_audit').select('*').order('at', {ascending: false}).limit(300)), must(SB.from('cp_allowed_users').select('*').order('email')), all('cp_payees', 'name')]);
   S = {companies: {}, accounts: {}, layouts: {}, checks: {}, audit: {}};
-  cos.forEach(r => S.companies[r.id] = coFromRow(r)); acs.forEach(r => S.accounts[r.id] = acFromRow(r)); lays.forEach(r => S.layouts[r.id] = r.data);
+  cos.forEach(r => S.companies[r.id] = coFromRow(r)); acs.forEach(r => S.accounts[r.id] = acFromRow(r)); PRINT.font = ''; lays.forEach(r => { if (r.id === PRINT_ROW) PRINT.font = r.data?.font || ''; else S.layouts[r.id] = r.data; });
   cks.forEach(r => applyRow('cp_checks', r)); au.forEach(r => applyRow('cp_audit', r)); CP_USERS = users; CP_PAYEES = pays;
   if (CP_CHANNEL) SB.removeChannel(CP_CHANNEL);
   CP_CHANNEL = SB.channel('cp-live');

@@ -315,9 +315,48 @@ const STD = Object.fromEntries(BANKS.map(b => ['std-' + b[0], stdLayout(b[0])]))
 function allLayouts() { return {...STD, ...S.layouts}; }
 function getLayout(id) { const L = allLayouts()[id]; if (!L) return clone(STD['std-BDO']); const base = stdLayout(L.bank || 'BDO'); const out = deepMerge(clone(base), clone(L)); out.id = id; return out; }
 
-// Print fonts: the three PDF built-in families (no font download needed). [jsPDF name, screen CSS family]
-const PFONT = {helvetica: ['helvetica', 'Helvetica, Arial, sans-serif'], courier: ['courier', '"Courier New", Courier, monospace'], times: ['times', '"Times New Roman", Times, serif']};
-const pf = L => PFONT[L.font] || PFONT.helvetica;
+// Print fonts: three PDF built-in families, plus Tahoma (embedded from this PC's own Windows font files). [jsPDF name, screen CSS family]
+const PFONT = {helvetica: ['helvetica', 'Helvetica, Arial, sans-serif'], courier: ['courier', '"Courier New", Courier, monospace'], times: ['times', '"Times New Roman", Times, serif'], tahoma: ['Tahoma', 'Tahoma, Verdana, Geneva, sans-serif']};
+const FONT_OPTS = [['helvetica', 'Helvetica (clean)'], ['courier', 'Courier (typewriter)'], ['times', 'Times (serif)'], ['tahoma', 'Tahoma']];
+// One print font for every bank: set by an administrator (Layouts > Print font, all banks). Empty = each layout's own font.
+const PRINT = {font: ''};
+function loadPrintSettings() { const v = lsGet('cp-print-settings', null); if (v && typeof v === 'object') PRINT.font = v.font || ''; }
+async function savePrintFont(font) { PRINT.font = font; lsSet('cp-print-settings', {font}); }
+const effFont = L => (PRINT.font && PFONT[PRINT.font]) ? PRINT.font : (PFONT[L.font] ? L.font : 'helvetica');
+const pf = L => PFONT[effFont(L)];
+// Tahoma is a Windows font, so it is not shipped with the site: each PC loads its own C:\Windows\Fonts\tahoma.ttf (and tahomabd.ttf
+// for bold) once; the bytes are kept in this browser (IndexedDB) and embedded in each PDF.
+const TAHOMA = {normal: null, bold: null};
+function fontDB() { return new Promise((res, rej) => { const r = indexedDB.open('cp-fonts', 1); r.onupgradeneeded = () => r.result.createObjectStore('f'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function loadTahoma() { try { const db = await fontDB(); for (const k of ['normal', 'bold']) TAHOMA[k] = await new Promise(res => { const q = db.transaction('f').objectStore('f').get('tahoma-' + k); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); }); } catch (e) { console.warn('Font store unavailable', e); } }
+async function storeTahoma(k, b64) { TAHOMA[k] = b64; try { const db = await fontDB(); await new Promise((res, rej) => { const t = db.transaction('f', 'readwrite'); t.objectStore('f').put(b64, 'tahoma-' + k); t.oncomplete = res; t.onerror = () => rej(t.error); }); } catch (e) { console.warn(e); } }
+const tahomaReady = () => !!(TAHOMA.normal || TAHOMA.bold);
+function pickTahoma() {
+  const inpEl = document.createElement('input'); inpEl.type = 'file'; inpEl.accept = '.ttf'; inpEl.multiple = true;
+  inpEl.onchange = async () => {
+    let n = 0;
+    for (const f of inpEl.files) {
+      const buf = new Uint8Array(await f.arrayBuffer()); const sig = String.fromCharCode(...buf.slice(0, 4));
+      if (!(sig === '\x00\x01\x00\x00' || sig === 'true')) { toast(f.name + ' is not a TrueType font (.ttf).', 'bad'); continue; }
+      let bin = ''; for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+      await storeTahoma(/bd|bold/i.test(f.name) ? 'bold' : 'normal', btoa(bin)); n++;
+    }
+    if (n) { toast(`Tahoma loaded on this PC${TAHOMA.bold ? '' : ' (regular only: also pick tahomabd.ttf for bold print)'}.`); renderAll(true); }
+  };
+  inpEl.click();
+}
+// Sets the font on a jsPDF document (embedding Tahoma when needed) and returns false if it had to fall back to Helvetica.
+function pdfFont(doc, L) {
+  const f = effFont(L), want = L.bold ? 'bold' : 'normal';
+  if (f !== 'tahoma') { doc.setFont(PFONT[f][0], want); return true; }
+  const k = TAHOMA[want] ? want : (TAHOMA.normal ? 'normal' : (TAHOMA.bold ? 'bold' : null));
+  if (!k) { doc.setFont('helvetica', want); return false; }
+  doc.__th ??= {};
+  if (!doc.__th[k]) { doc.addFileToVFS('tahoma-' + k + '.ttf', TAHOMA[k]); doc.addFont('tahoma-' + k + '.ttf', 'Tahoma', k); doc.__th[k] = 1; }
+  doc.setFont('Tahoma', k); return true;
+}
+const tahomaHint = () => `<b>Tahoma is not loaded on this PC yet</b>, so checks print in Helvetica here. <a data-loadtahoma>Load Tahoma</a> and pick <span class="mono">tahoma.ttf</span> and <span class="mono">tahomabd.ttf</span> (type <span class="mono">C:\\Windows\\Fonts\\tahoma.ttf</span> in the file name box). This is needed once per PC.`;
+document.addEventListener('click', e => { if (e.target.closest('[data-loadtahoma]')) { e.preventDefault(); pickTahoma(); } });
 function measureCanvas(t, size, bold, font) {
   const ctx = measureCanvas.ctx || (measureCanvas.ctx = document.createElement('canvas').getContext('2d'));
   ctx.font = (bold ? 'bold ' : '') + '100px ' + (PFONT[font] || PFONT.helvetica)[1];
@@ -447,7 +486,7 @@ function plainLeaf(W, H) {
 }
 function leafSVG(L, d, opt = {}) {
   const W = +L.checkW, H = +L.checkH, F = L.fields, k = 0.352778;
-  const items = buildItems(L, d, (t, s) => measureCanvas(t, s, L.bold, L.font));
+  const items = buildItems(L, d, (t, s) => measureCanvas(t, s, L.bold, effFont(L)));
   const pid = 'gl' + (++leafSeq);
   let s = `<svg class="leaf" viewBox="0 0 ${W} ${H}" role="img" aria-label="Check preview">` + (opt.plain ? plainLeaf(W, H) : leafDecor(L, d, W, H, pid));
   // printed items
@@ -488,7 +527,7 @@ function drawItems(doc, L, items, ox, oy) {
       doc.setFont('helvetica', 'bold'); doc.setFontSize(6.5); doc.text('A/C PAYEE ONLY', x + 6.3, y + 13.9, {angle: 45});
       continue;
     }
-    doc.setFont(pf(L)[0], L.bold ? 'bold' : 'normal'); doc.setFontSize(it.size);
+    pdfFont(doc, L); doc.setFontSize(it.size);
     // Extra dark: outline each letter as well as filling it, so thin strokes don't break up on a dot-matrix printer.
     const o = {}; if (it.align === 'center' || it.align === 'right') o.align = it.align; if (L.heavy) { doc.setLineWidth(0.07); doc.setDrawColor(0); o.renderingMode = 'fillThenStroke'; }
     doc.text(it.text, ox + it.x * sx, oy + it.y * sy, o);
@@ -496,7 +535,7 @@ function drawItems(doc, L, items, ox, oy) {
 }
 function checkPdf(L, d, test = false) {
   const {doc, ox, oy} = newCheckDoc(L);
-  const measure = (t, s) => { doc.setFont(pf(L)[0], L.bold ? 'bold' : 'normal'); doc.setFontSize(s); return doc.getTextWidth(t); };
+  const measure = (t, s) => { pdfFont(doc, L); doc.setFontSize(s); return doc.getTextWidth(t); };
   const items = buildItems(L, d, measure);
   if (test) {
     doc.setDrawColor(120); doc.setLineWidth(0.2); doc.setLineDashPattern([1.2, 1], 0);
@@ -557,7 +596,7 @@ function voucherPdf(rec) {
     y += h + 3.5;
   };
   box([['Supplier Code:', pay.code || ''], ['Supplier Name:', rec.payee || ''], ['Supplier Address:', pay.address || ''], ['Supplier TIN:', pay.tin || '']]);
-  box([['Check #:', rec.noStr || ''], ['Bank:', [bankName(acct.bank), acct.name, acct.number].filter(Boolean).join(' - ')], ['Branch:', acct.branch || ''], ['Check Amount:', peso(rec.amount)]]);
+  box([['Ref / Check #:', [refOf(rec), checkNoOf(rec)].filter(Boolean).join(' / ')], ['Bank:', [bankName(acct.bank), acct.name, acct.number].filter(Boolean).join(' - ')], ['Branch:', acct.branch || ''], ['Check Amount:', peso(rec.amount)]]);
   // payment details
   T('PAYMENT DETAILS:', M, y + 2, {b: 1}); y += 6.5;
   const pc = [['Date', fmtDate(rec.date, 'MM/DD/YYYY')], ['Type', v.payType || ''], ['Reference No.', v.refNo || ''], ['APV No.', v.apvNo || ''], ['Paid Amount', peso(rec.amount)]];
@@ -631,7 +670,12 @@ const ME = {id: null, name: ''};
 /* ---------- derived data ---------- */
 const BUCKET = 200;
 const bucketId = (acctId, no) => acctId + '~' + Math.floor(no / BUCKET);
-function padNo(acct, no) { return String(no).padStart(acct?.digits || 10, '0'); }
+// Checks issued without a check number are keyed by -N, where REF-N is their automatic reference number.
+const fmtRef = n => 'REF-' + String(n).padStart(6, '0');
+function padNo(acct, no) { return +no < 0 ? fmtRef(-no) : String(no).padStart(acct?.digits || 10, '0'); }
+const refOf = r => r?.refId || (+r?.no < 0 ? fmtRef(-r.no) : '');
+const checkNoOf = r => (+r?.no > 0 ? r.noStr : '');
+function nextLocalRef() { let m = 0; for (const r of allChecks()) { const n = +String(refOf(r)).replace(/\D/g, ''); if (n > m) m = n; } return m + 1; }
 // Digit count of a check number typed with leading zeros (e.g. 0000123456 -> 10), or 0 when it says nothing new.
 function typedDigits(no, acct) { const t = String(no || '').trim().replace(/\D/g, ''); return t.length > 1 && t.length <= 20 && (t[0] === '0' || t.length > (+acct?.digits || 10)) && t.length !== +acct?.digits ? t.length : 0; }
 function lastCheckNo(acctId) { let m = 0; for (const c of allChecks()) if (c.accountId === acctId && c.no > m) m = c.no; return m; }
@@ -772,7 +816,7 @@ function renderWrite(force) {
         <div class="sec-head"><h2>New check</h2><div class="actions"><span class="hint" id="w-series"></span><label class="inline" style="font-weight:600"><input type="checkbox" id="w-ac"> Cross: A/C PAYEE ONLY</label><button type="button" class="btn sm" id="w-clear-top" title="Clear payee, amount, words, CV no., particulars and entries">Clear form</button></div></div>
         <label class="f">Bank account<select id="w-acct"></select></label>
         <div class="row">
-          <label class="f"><span>Check no. <span class="req" title="Required">*</span></span><input id="w-no" class="mono" inputmode="numeric" required aria-required="true"></label>
+          <label class="f"><span>Check no. <span class="hint" style="font-weight:400">(optional)</span></span><input id="w-no" class="mono" inputmode="numeric"></label>
           <label class="f">Check date<input id="w-date" type="date"></label>
         </div>
         <label class="f">Payee<span class="clr-wrap"><input id="w-payee" list="payees" placeholder="Name exactly as it should appear on the check"><button type="button" class="clr" data-clear="payee" aria-label="Clear payee" title="Clear">×</button></span></label>
@@ -878,12 +922,13 @@ function updateWrite(refreshSelect) {
   if (!companyList().length) m.push(['bad', 'Add your company first. <a data-go="companies">Open Companies</a>']);
   else if (!acct) m.push(['bad', 'Add a bank account first. <a data-go="accounts">Open Bank accounts</a>']);
   if (acct) {
-    if (!no) m.push(['warn', `<b>Check number is required.</b> Type the number printed on the leaf.${lastCheckNo(acct.id) ? ` Last check no. used: ${padNo(acct, lastCheckNo(acct.id))}.` : ''}`]);
+    if (!no) m.push(['info', 'The check number is pre-printed on the leaf, so it is optional. A reference number (REF-######) is assigned automatically when you issue the check.']);
     else {
       const ex = findCheck(acct.id, no);
       if (ex) m.push(['bad', `Check ${padNo(acct, no)} is already in the register (${effStatus(ex)}, ${esc(ex.payee || 'spoiled')}). Use Register › PDF to reprint it.`]);
     }
     if (acct.active === false) m.push(['warn', 'This account is marked inactive.']);
+    if (L && effFont(L) === 'tahoma' && !tahomaReady()) m.push(['warn', tahomaHint()]);
   }
   const t = todayISO();
   if (d.date > t) m.push(['info', `Post-dated check: can be encashed on ${fmtDate(d.date, 'MMMM DD, YYYY')}.`]);
@@ -896,7 +941,7 @@ function updateWrite(refreshSelect) {
   $('#w-issue').disabled = blocking;
   const miss = d.tried ? missingFields(d) : [];
   for (const [sel] of REQ_FIELDS) $(sel).setAttribute('aria-invalid', String(miss.some(x => x[0] === sel)));
-  $('#w-no').placeholder = 'Type check no.';
+  $('#w-no').placeholder = 'Optional (pre-printed)';
   $('#w-issue').textContent = isPrint() ? 'Issue & print check' : 'Issue check & download PDF';
   $('#w-alsov-lbl').textContent = isPrint() ? ' Also print the check voucher' : ' Also download the check voucher';
   // last issued
@@ -906,7 +951,7 @@ function updateWrite(refreshSelect) {
 function sampleData(L) { return {date: todayISO(), payee: 'Juan dela Cruz Trading', amount: 125430.5, words: amountWords(125430.5, L?.fields?.words || stdLayout('BDO').fields.words), cvNo: 'CV-' + new Date().getFullYear() + '-0001', acPayee: true, particulars: 'Sample particulars', noStr: '0000123456', acctNo: '001234567890', acctLabel: 'Sample account'}; }
 
 // Required fields: block Issue until they are filled, and say which one is missing.
-const REQ_FIELDS = [['#w-no', 'check number', d => parseInt(d.no, 10) > 0], ['#w-date', 'check date', d => !!d.date], ['#w-payee', 'payee', d => !!d.payee.trim()], ['#w-amt', 'amount', d => parseAmt(d.amount) > 0]];
+const REQ_FIELDS = [['#w-date', 'check date', d => !!d.date], ['#w-payee', 'payee', d => !!d.payee.trim()], ['#w-amt', 'amount', d => parseAmt(d.amount) > 0]];
 const missingFields = d => REQ_FIELDS.filter(([, , ok]) => !ok(d));
 function checkRequired() {
   const d = app.draft, miss = missingFields(d); d.tried = miss.length > 0;
@@ -919,18 +964,19 @@ function checkRequired() {
 
 async function issueCheck() {
   const d = app.draft; const {acct, co, L} = syncDraftAuto(); if (!acct) return;
-  const no = parseInt(d.no, 10); const data = writeData(d, acct);
-  if (!no || !data.amount || !data.payee) return;
+  const typedNo = parseInt(d.no, 10) > 0 ? parseInt(d.no, 10) : 0; const data = writeData(d, acct);
+  if (!data.amount || !data.payee) return;
+  const no = typedNo || -nextLocalRef();
   if (findCheck(acct.id, no)) { toast('That check number is already used.', 'bad'); return; }
   const rec = {date: d.date, payee: data.payee, amount: data.amount, words: d.words, particulars: d.particulars.trim(), cvNo: d.cvNo.trim(),
     acPayee: !!d.acPayee, entries: d.entries.filter(x => x.acct || x.dr || x.cr).map(x => ({acct: x.acct, dr: parseAmt(x.dr), cr: parseAmt(x.cr)})),
-    voucher: voucherOf(d), status: 'Issued', companyId: acct.companyId, createdAt: new Date().toISOString(), createdBy: ME.id || '', createdByName: ME.name || '', printed: 1};
+    voucher: voucherOf(d), refId: typedNo ? fmtRef(nextLocalRef()) : fmtRef(-no), status: 'Issued', companyId: acct.companyId, createdAt: new Date().toISOString(), createdBy: ME.id || '', createdByName: ME.name || '', printed: 1};
   const btn = $('#w-issue'); btn.disabled = true;
   try {
     const b = bucketId(acct.id, no);
     await patch('checks', b, {accountId: acct.id, checks: {[no]: rec}});
-    const dg = typedDigits(d.no, acct);
-    if (no >= (+acct.nextNo || 0) || (dg && dg !== +acct.digits)) await patch('accounts', acct.id, {nextNo: Math.max(no + 1, +acct.nextNo || 0), ...(dg ? {digits: dg} : {})});
+    const dg = typedNo ? typedDigits(d.no, acct) : 0;
+    if (typedNo && no >= (+acct.nextNo || 0) || (dg && dg !== +acct.digits)) await patch('accounts', acct.id, {nextNo: Math.max(no + 1, +acct.nextNo || 0), ...(dg ? {digits: dg} : {})});
     if (d.cvAuto && co) await patch('companies', acct.companyId, {cvNext: (+co.cvNext || 1) + 1});
     audit('Issued', `${bankName(acct.bank)} ${acct.number || ''} #${padNo(acct, no)} · ${rec.payee} · ₱${peso(rec.amount)}`);
   } catch (e) { writeErr(e); btn.disabled = false; return; }
@@ -964,7 +1010,7 @@ function regRows() {
   return allChecks().filter(r => (app.company === 'ALL' || r.companyId === app.company) && (f.account === 'ALL' || r.accountId === f.account)
     && (f.status === 'ALL' || effStatus(r) === f.status || (f.status === 'Outstanding' && ['Issued','Released','Post-dated','Stale'].includes(effStatus(r))))
     && (!f.from || r.date >= f.from) && (!f.to || r.date <= f.to)
-    && (!q || [r.payee, r.noStr, r.cvNo, r.particulars].some(v => String(v || '').toLowerCase().includes(q))))
+    && (!q || [r.payee, r.noStr, refOf(r), r.cvNo, r.particulars].some(v => String(v || '').toLowerCase().includes(q))))
     .sort((a, b) => b.date.localeCompare(a.date) || b.no - a.no);
 }
 function renderRegister() {
@@ -982,7 +1028,7 @@ function renderRegister() {
       <div class="sec-head" style="margin-bottom:10px"><h2>Check register</h2><div class="actions"><span id="r-bulk" class="actions" style="margin:0"></span><button class="btn" id="r-spoil">Record spoiled leaf</button><button class="btn primary" id="r-xlsx">Export to Excel</button></div></div>
       <div id="r-spoilbox"></div>
       <div id="r-bulkbox"></div>
-      <div class="table-wrap"><table class="t"><thead><tr><th>Check no.</th><th>Date</th><th>Payee</th><th class="r">Amount</th><th>Account</th><th>CV no.</th><th>Status</th><th></th></tr></thead><tbody id="r-body"></tbody></table></div>
+      <div class="table-wrap"><table class="t"><thead><tr><th>Ref no.</th><th>Date</th><th>Payee</th><th class="r">Amount</th><th>Account</th><th>CV no.</th><th>Status</th><th></th></tr></thead><tbody id="r-body"></tbody></table></div>
       <div class="section"><div class="sec-head"><h2>Summary by bank account</h2><span class="hint">Uses the company, date and search filters above</span></div>
       <div class="table-wrap"><table class="t"><thead><tr><th>Account</th><th>Company</th><th>Last check no.</th><th class="r">Checks</th><th class="r">Outstanding</th><th class="r">Cleared</th><th class="r">Voided</th></tr></thead><tbody id="r-sum"></tbody></table></div></div>`;
     const f = app.reg;
@@ -1023,7 +1069,7 @@ function renderRegister() {
       (r.status === 'Issued' ? `<button class="btn sm" data-act="Released" data-k="${key}">Released</button>` : '') +
       (r.status !== 'Cleared' ? `<button class="btn sm" data-act="Cleared" data-k="${key}">Cleared</button>` : '') +
       `<button class="btn sm danger" data-act="void" data-k="${key}">Void</button>`;
-    let h = `<tr class="${st === 'Voided' ? 'void' : ''}${app.regSel.has(key) ? ' sel' : ''}"><td class="mono">${canDelete() ? `<label class="inline" style="gap:6px"><input type="checkbox" data-sel="${key}" ${app.regSel.has(key) ? 'checked' : ''} aria-label="Select check ${r.noStr}">${r.noStr}</label>` : r.noStr}</td><td class="mono">${r.date}</td><td>${esc(r.payee || '—')}${r.voidReason ? `<div class="hint">Void: ${esc(r.voidReason)}</div>` : ''}${r.acPayee ? `<div class="hint">A/C payee only</div>` : ''}</td><td class="r mono amt">${peso(r.amount)}</td><td>${esc(a ? bankName(a.bank) : '—')}<div class="hint mono">${esc(a?.number || '')}</div></td><td class="mono">${esc(r.cvNo || '')}</td><td><span class="st st-${st}">${st}</span>${r.printed > 1 ? `<div class="hint">printed ${r.printed}×</div>` : ''}</td><td><div class="rowacts">${acts}${canDelete() ? `<button class="btn sm" data-act="reissue" data-k="${key}" title="Delete this entry and load it into Write check to issue it again">Re-issue</button><button class="btn sm danger" data-act="delete" data-k="${key}" title="Delete this entry from the register">Delete</button>` : ''}</div></td></tr>`;
+    let h = `<tr class="${st === 'Voided' ? 'void' : ''}${app.regSel.has(key) ? ' sel' : ''}"><td class="mono">${canDelete() ? `<label class="inline" style="gap:6px"><input type="checkbox" data-sel="${key}" ${app.regSel.has(key) ? 'checked' : ''} aria-label="Select check ${r.noStr}">${esc(refOf(r) || r.noStr)}</label>` : esc(refOf(r) || r.noStr)}${checkNoOf(r) ? `<div class="hint mono">Check #${r.noStr}</div>` : ''}</td><td class="mono">${r.date}</td><td>${esc(r.payee || '—')}${r.voidReason ? `<div class="hint">Void: ${esc(r.voidReason)}</div>` : ''}${r.acPayee ? `<div class="hint">A/C payee only</div>` : ''}</td><td class="r mono amt">${peso(r.amount)}</td><td>${esc(a ? bankName(a.bank) : '—')}<div class="hint mono">${esc(a?.number || '')}</div></td><td class="mono">${esc(r.cvNo || '')}</td><td><span class="st st-${st}">${st}</span>${r.printed > 1 ? `<div class="hint">printed ${r.printed}×</div>` : ''}</td><td><div class="rowacts">${acts}${canDelete() ? `<button class="btn sm" data-act="reissue" data-k="${key}" title="Delete this entry and load it into Write check to issue it again">Re-issue</button><button class="btn sm danger" data-act="delete" data-k="${key}" title="Delete this entry from the register">Delete</button>` : ''}</div></td></tr>`;
     if (app.delOpen?.key === key) h += `<tr class="voidrow"><td colspan="8"><form class="actions" data-delform="${key}"><b>${app.delOpen.reissue ? 'Delete and re-issue' : 'Delete'} check ${r.noStr}?</b><span class="hint" style="color:inherit">${r.status === 'Cleared' || r.status === 'Released' ? `<b>This check is marked ${r.status}.</b> Delete it only if it was a test or was entered by mistake. ` : ''}${app.delOpen.reissue ? 'The entry is removed and its details are loaded into Write check, so you can correct them and issue the same check number again.' : 'The entry is removed from the register and the check number can be used again.'} The deleted details are kept in the audit log.</span><input id="del-reason" placeholder="Reason (required)" style="max-width:280px" required><button class="btn sm danger">${app.delOpen.reissue ? 'Delete & re-issue' : 'Delete entry'}</button><button type="button" class="btn sm" data-act="canceldel">Keep</button></form></td></tr>`;
     if (app.voidOpen === key) h += `<tr class="voidrow"><td colspan="8"><form class="actions" data-voidform="${key}"><b>Void check ${r.noStr}?</b><input id="void-reason" placeholder="Reason (required)" style="max-width:320px" required><button class="btn sm danger">Confirm void</button><button type="button" class="btn sm" data-act="cancelvoid">Keep check</button></form></td></tr>`;
     return h;
@@ -1130,7 +1176,7 @@ async function delSubmit(e) {
   toast(`Check ${padNo(a, no)} deleted from the register.`);
   if (!reissue) { renderRegister(); return; }
   const d = newDraft(acctId);
-  Object.assign(d, {no: String(no), noAuto: false, date: r.date || todayISO(), payee: r.payee || '', amount: r.amount ? peso(r.amount) : '', particulars: r.particulars || '', cvNo: r.cvNo || '', cvAuto: !r.cvNo, acPayee: !!r.acPayee, alsoVoucher: app.draft.alsoVoucher, ...(r.voucher ? {supCode: r.voucher.supplierCode || '', supAddr: r.voucher.supplierAddress || '', supTin: r.voucher.supplierTin || '', supAuto: false, payType: r.voucher.payType || 'AP', refNo: r.voucher.refNo || '', apvNo: r.voucher.apvNo || ''} : {})});
+  Object.assign(d, {no: no > 0 ? String(no) : "", noAuto: false, date: r.date || todayISO(), payee: r.payee || '', amount: r.amount ? peso(r.amount) : '', particulars: r.particulars || '', cvNo: r.cvNo || '', cvAuto: !r.cvNo, acPayee: !!r.acPayee, alsoVoucher: app.draft.alsoVoucher, ...(r.voucher ? {supCode: r.voucher.supplierCode || '', supAddr: r.voucher.supplierAddress || '', supTin: r.voucher.supplierTin || '', supAuto: false, payType: r.voucher.payType || 'AP', refNo: r.voucher.refNo || '', apvNo: r.voucher.apvNo || ''} : {})});
   if (r.entries?.length) d.entries = r.entries.map(x => ({acct: x.acct || '', dr: x.dr ? String(x.dr) : '', cr: x.cr ? String(x.cr) : ''}));
   if (app.company !== 'ALL' && app.company !== r.companyId) { app.company = 'ALL'; lsSet('mtc-co', 'ALL'); }
   app.draft = d; app.last = null; go('write');
@@ -1160,7 +1206,7 @@ async function exportXlsx() {
   if (!window.XLSX) { toast('The Excel library did not load. Check your connection and reload.', 'bad'); return; }
   const rows = regRows();
   if (!rows.length) { toast('Nothing to export with these filters.', 'warn'); return; }
-  const data = rows.map(r => { const a = S.accounts[r.accountId] || {}; return {'Check No.': r.noStr, 'Check Date': r.date, 'Payee': r.payee, 'Amount': r.amount, 'Status': effStatus(r), 'Company': S.companies[r.companyId]?.name || '', 'Bank': bankName(a.bank), 'Account No.': a.number || '', 'CV No.': r.cvNo || '', 'Particulars': r.particulars || '', 'Amount in Words': r.words || '', 'A/C Payee': r.acPayee ? 'Yes' : '', 'Void Reason': r.voidReason || '', 'Issued At': phTime(r.createdAt), 'Released At': (r.releasedAt || '').slice(0, 10), 'Cleared At': (r.clearedAt || '').slice(0, 10), 'Times Printed': r.printed || 0}; });
+  const data = rows.map(r => { const a = S.accounts[r.accountId] || {}; return {'Ref No.': refOf(r), 'Check No.': checkNoOf(r), 'Check Date': r.date, 'Payee': r.payee, 'Amount': r.amount, 'Status': effStatus(r), 'Company': S.companies[r.companyId]?.name || '', 'Bank': bankName(a.bank), 'Account No.': a.number || '', 'CV No.': r.cvNo || '', 'Particulars': r.particulars || '', 'Amount in Words': r.words || '', 'A/C Payee': r.acPayee ? 'Yes' : '', 'Void Reason': r.voidReason || '', 'Issued At': phTime(r.createdAt), 'Released At': (r.releasedAt || '').slice(0, 10), 'Cleared At': (r.clearedAt || '').slice(0, 10), 'Times Printed': r.printed || 0}; });
   const ws = XLSX.utils.json_to_sheet(data);
   ws['!cols'] = [14, 12, 34, 14, 11, 30, 26, 16, 16, 40, 60, 9, 30, 17, 12, 12, 8].map(w => ({wch: w}));
   const rng = XLSX.utils.decode_range(ws['!ref']); for (let R = 1; R <= rng.e.r; R++) { const c = ws[XLSX.utils.encode_cell({r: R, c: 3})]; if (c) c.z = '#,##0.00'; }
@@ -1261,9 +1307,10 @@ function renderLayouts(force) {
           <button class="btn" id="l-cal" type="button">Apply ruler</button>
         </div>
         <p class="hint" style="margin:0">If the date digits drift out of their boxes one after another (or the amount runs long or short), the printer is scaling the print. Print the <b>Alignment test PDF</b> at Actual size, measure the X ruler from 0 to 180 and the Y ruler from 0 to 50 with a ruler, type the numbers above and click <b>Apply ruler</b>, then Save layout.</p>
-        <div class="mini" style="align-items:end">${inp('font', 'Print font', 'sel', [['helvetica', 'Helvetica (clean)'], ['courier', 'Courier (typewriter)'], ['times', 'Times (serif)']])}
+        <div class="mini" style="align-items:end"><label class="f">Print font (all banks)<select id="g-font" ${canEditLayouts() ? '' : 'disabled'} title="Applies to every bank's checks, including locked layouts">${PRINT.font ? '' : `<option value="" selected>Each layout's own (${esc(PFONT[L.font] ? FONT_OPTS.find(o => o[0] === L.font)[1] : 'Helvetica')})</option>`}${FONT_OPTS.map(([v, t]) => `<option value="${v}" ${PRINT.font === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
           <div class="actions" style="margin:0">${inp('bold', 'Bold print', 'chk')}${inp('heavy', 'Extra dark (dot-matrix)', 'chk')}</div></div>
-        <p class="hint" style="margin:0">For a dot-matrix printer (Epson LX-310) keep <b>Bold print</b> on. If letters still look thin or broken, tick <b>Extra dark</b> or try Courier, and set the printer's Print Quality to High (not Draft).</p>
+        ${effFont(L) === 'tahoma' && !tahomaReady() ? `<div class="msg warn" style="margin:0">${tahomaHint()}</div>` : effFont(L) === 'tahoma' ? `<p class="hint" style="margin:0">Tahoma is loaded on this PC${TAHOMA.bold ? '' : ' (regular only)'}. <a data-loadtahoma>Load again</a></p>` : ''}
+        <p class="hint" style="margin:0">The print font applies to every bank. For a dot-matrix printer (Epson LX-310) keep <b>Bold print</b> on. If letters still look thin or broken, tick <b>Extra dark</b> or try Courier, and set the printer's Print Quality to High (not Draft).</p>
         <p class="hint" style="margin:0">Printer shift moves everything at once. Positive X moves right, positive Y moves down. Measure the error on a test print with a ruler and enter it here.</p>
       </div>
       ${Object.entries(FIELD_UI).map(([f, [label, extra]]) => `<div class="fgroup ${app.layoutSel === f ? 'on' : ''}" data-fg="${f}"><header><b>${label}</b>${inp(`fields.${f}.show`, 'Print', 'chk')}</header>
@@ -1290,6 +1337,12 @@ function renderLayouts(force) {
   $('#l-pick').addEventListener('change', e => { app.layoutId = e.target.value; app.layoutDraft = null; renderLayouts(true); });
   if (!el._bound) { el._bound = true; el.addEventListener('input', layoutInput); el.addEventListener('change', layoutInput); }
   if (locked) el.querySelectorAll('[data-p], #l-mx, #l-my, #l-cal').forEach(i => { i.disabled = true; });
+  $('#g-font')?.addEventListener('change', async e => {
+    const v = e.target.value; if (!canEditLayouts()) return;
+    try { await savePrintFont(v); audit('Changed print font', `All banks: ${FONT_OPTS.find(o => o[0] === v)?.[1] || 'each layout\u2019s own'}`); toast(`Print font for all banks: ${FONT_OPTS.find(o => o[0] === v)?.[1] || 'each layout\u2019s own'}.`); }
+    catch (err) { writeErr(err); }
+    mounted.layouts = false; renderAll(true);
+  });
   $('#l-unlock')?.addEventListener('click', () => setLayoutLock(false));
   $('#l-lock')?.addEventListener('click', () => { if (app.layoutDirty) { $('#l-msg').innerHTML = `<div class="msg warn">Save layout first, then lock it.</div>`; return; } setLayoutLock(true); });
   $('#l-save')?.addEventListener('click', () => saveLayout(false));
@@ -1460,7 +1513,9 @@ async function doImport() {
 (function boot() {
   const h = (location.hash || '').slice(1); if (['write','register','accounts','layouts','companies'].includes(h)) app.tab = h;
   const local = lsGet(LSKEY, null); if (local) for (const c of COLS) S[c] = local[c] || {};
+  loadPrintSettings();
   renderAll(true);
+  loadTahoma().then(() => { if (tahomaReady()) { mounted.layouts = false; renderAll(true); } });
   if (!window.claude?.use) return;
   claude.use('downloads').then(d => DL = d).catch(() => {});
   claude.use('user').then(async u => { USER = u; if (!u) return; try { ME.id = await u.id(); const me = await u.me(); ME.name = me?.name || ''; } catch {} }).catch(() => {});
