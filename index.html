@@ -572,8 +572,19 @@ function checkPdf(L, d, test = false) {
 }
 // Check voucher details typed on Write check, stored with the check.
 const PAY_TYPES = ['AP', 'CHK', 'PO', 'CA', 'Reimbursement', 'Others'];
-function voucherOf(d) { const v = {supplierCode: d.supCode, supplierAddress: d.supAddr, supplierTin: d.supTin, payType: d.payType, refNo: d.refNo, apvNo: d.apvNo}; for (const k in v) { v[k] = String(v[k] || '').trim(); if (!v[k]) delete v[k]; } return v; }
+function voucherOf(d) { const v = {supplierCode: d.supCode, supplierAddress: d.supAddr, supplierTin: d.supTin, payType: d.payType, refNo: d.refNo, apvNo: d.apvNo, reviewedBy: d.reviewedBy, approvedBy: d.approvedBy}; for (const k in v) { v[k] = String(v[k] || '').trim(); if (!v[k]) delete v[k]; } return v; }
 // Fill supplier code, address and TIN from the saved payee until the user types their own.
+// Reviewer and approver names: follow the company's default signatories until the user types their own.
+function sigFromCompany(d, co) { if (!d.sigAuto) return; d.reviewedBy = co?.checked || ''; d.approvedBy = co?.approved || ''; }
+// Carry the reviewer/approver to the next check (the same people usually sign every voucher).
+function keepSig(nd, od) { nd.reviewedBy = od.reviewedBy; nd.approvedBy = od.approvedBy; nd.sigAuto = od.sigAuto; nd.sigCo = od.sigCo; return nd; }
+// Suggestions for the name boxes: company defaults plus names used on earlier vouchers, most used first.
+function sigNames(key) {
+  const n = {}; const add = (x, w) => { x = String(x || '').trim(); if (x) n[x] = (n[x] || 0) + w; };
+  for (const co of Object.values(S.companies)) { add(co.checked, 1); add(co.approved, 1); }
+  for (const c of allChecks()) { add(c.voucher?.reviewedBy, 2); add(c.voucher?.approvedBy, 2); }
+  return Object.keys(n).sort((a, b) => n[b] - n[a] || a.localeCompare(b)).slice(0, 40);
+}
 function supplierFromPayee(d) { if (!d.supAuto) return; const p = payeeInfo(d.payee) || {}; d.supCode = p.code || ''; d.supAddr = p.address || ''; d.supTin = p.tin || ''; }
 // Lookups the online edition fills in: payee master (address, TIN) and a user's display name.
 function payeeInfo(name) { return null; }
@@ -630,7 +641,7 @@ function voucherPdf(rec) {
   // approval signatures
   T('APPROVAL SIGNATURES:', M, y, {b: 1}); y += 2.5;
   const sw = W / 3, hh = 5.5, bh = 14, fh = 5.5, creator = userName(rec.createdByName || rec.createdBy);
-  const sig = [['Prepared by:', co.prepared || creator, 'Creator'], ['Reviewed by:', co.checked, 'Reviewer'], ['Approved by:', co.approved, 'Approver']];
+  const sig = [['Prepared by:', co.prepared || creator, 'Creator'], ['Reviewed by:', v.reviewedBy || co.checked, 'Reviewer'], ['Approved by:', v.approvedBy || co.approved, 'Approver']];
   doc.rect(M, y, W, hh + bh + fh); doc.line(M, y + hh, R, y + hh); doc.line(M, y + hh + bh, R, y + hh + bh);
   sig.forEach(([h, name, role], i) => {
     const x = M + i * sw; if (i) doc.line(x, y, x, y + hh + bh + fh);
@@ -757,7 +768,7 @@ const app = {
 };
 function newDraft(keepAcct) {
   return {accountId: keepAcct || '', no: '', noAuto: false, date: todayISO(), payee: '', amount: '', words: '', wordsManual: false,
-    particulars: '', cvNo: '', cvAuto: true, acPayee: false, supCode: '', supAddr: '', supTin: '', supAuto: true, payType: 'AP', refNo: '', apvNo: '', entries: [{acct: '', dr: '', cr: ''}, {acct: '', dr: '', cr: ''}], alsoVoucher: true};
+    particulars: '', cvNo: '', cvAuto: true, acPayee: false, supCode: '', supAddr: '', supTin: '', supAuto: true, payType: 'AP', refNo: '', apvNo: '', reviewedBy: '', approvedBy: '', sigAuto: true, sigCo: '', entries: [{acct: '', dr: '', cr: ''}, {acct: '', dr: '', cr: ''}], alsoVoucher: true};
 }
 app.draft = newDraft();
 
@@ -860,6 +871,7 @@ function syncDraftAuto() {
   if (acct && d.noAuto) d.no = String(acct.nextNo || acct.seriesFrom || 1);
   const co = acct ? S.companies[acct.companyId] : null;
   if (d.cvAuto) d.cvNo = co ? nextCv(co) : '';
+  const cid = acct?.companyId || ''; if (d.sigAuto || d.sigCo !== cid) { if (d.sigCo !== cid && d.sigCo) d.sigAuto = true; d.sigCo = cid; if (d.sigAuto) { sigFromCompany(d, co); fillSig(); } }
   const L = acct ? getLayout(acct.layoutId || 'std-' + acct.bank) : null;
   if (!d.wordsManual) d.words = amountWords(parseAmt(d.amount), L?.fields.words || stdLayout('BDO').fields.words);
   return {acct, co, L};
@@ -891,6 +903,9 @@ function renderWrite(force) {
             <div class="row"><label class="f">Payment type<input id="w-ptype" list="w-ptypes" maxlength="30"><datalist id="w-ptypes">${PAY_TYPES.map(t => `<option value="${t}">`).join('')}</datalist></label>
               <label class="f">Reference no.<input id="w-ref" maxlength="60" placeholder="e.g. Invoice / SI no."></label><label class="f">APV no.<input id="w-apv" maxlength="60"></label></div>
             <p class="hint" style="margin:0">Supplier code, address and TIN fill in from the saved payee. Anything you type here is saved back to the payee when the check is issued.</p>
+            <div class="row"><label class="f">Reviewed by<span class="clr-wrap"><input id="w-rev" list="w-signames" maxlength="80" placeholder="Name of reviewer" autocomplete="off"><button type="button" class="clr" data-clear="reviewedBy" aria-label="Clear reviewer" title="Clear">×</button></span></label>
+              <label class="f">Approved by<span class="clr-wrap"><input id="w-appr" list="w-signames" maxlength="80" placeholder="Name of approver" autocomplete="off"><button type="button" class="clr" data-clear="approvedBy" aria-label="Clear approver" title="Clear">×</button></span></label><datalist id="w-signames"></datalist></div>
+            <p class="hint" style="margin:0">Printed on the voucher under Reviewer and Approver. They start from the company's voucher signatories (Companies &amp; audit) and stay for the next check until you change them.</p>
           </div>
         </details>
         <details id="w-ent"><summary>Accounting entries on the voucher</summary>
@@ -924,15 +939,17 @@ function renderWrite(force) {
     bind('#w-date', 'date'); bind('#w-payee', 'payee', () => { supplierFromPayee(d()); fillSupplier(); }); bind('#w-amt', 'amount');
     for (const [id, k] of [['#w-scode', 'supCode'], ['#w-saddr', 'supAddr'], ['#w-stin', 'supTin']]) bind(id, k, () => d().supAuto = false);
     bind('#w-ptype', 'payType'); bind('#w-ref', 'refNo'); bind('#w-apv', 'apvNo');
+    bind('#w-rev', 'reviewedBy', () => d().sigAuto = false); bind('#w-appr', 'approvedBy', () => d().sigAuto = false);
+    for (const id of ['#w-rev', '#w-appr']) $(id).addEventListener('focus', fillSigNames);
     $('#w-amt').addEventListener('blur', e => { const v = parseAmt(e.target.value); if (v) { e.target.value = peso(v); d().amount = e.target.value; } });
     bind('#w-words', 'words'); bind('#w-cv', 'cvNo', () => d().cvAuto = false); bind('#w-ac', 'acPayee'); bind('#w-part', 'particulars'); bind('#w-alsov', 'alsoVoucher');
     $('#w-wm').addEventListener('change', e => { d().wordsManual = e.target.checked; $('#w-words').readOnly = !e.target.checked; updateWrite(); });
     $('#w-ent-add').addEventListener('click', () => { d().entries.push({acct: '', dr: '', cr: ''}); renderEntries(); });
     $('#w-ent-body').addEventListener('input', e => { const i = +e.target.dataset.i, k = e.target.dataset.k; if (k) { d().entries[i][k] = e.target.value; entTotals(); } });
     $('#w-ent-body').addEventListener('click', e => { const b = e.target.closest('[data-del]'); if (b) { d().entries.splice(+b.dataset.del, 1); renderEntries(); } });
-    const clearAll = () => { const keep = app.draft; app.draft = newDraft(keep.accountId); app.draft.alsoVoucher = keep.alsoVoucher; renderWrite(true); toast('Form cleared.'); $('#w-payee').focus(); };
+    const clearAll = () => { const keep = app.draft; app.draft = keepSig(newDraft(keep.accountId), keep); app.draft.alsoVoucher = keep.alsoVoucher; renderWrite(true); toast('Form cleared.'); $('#w-payee').focus(); };
     $('#w-clear').addEventListener('click', clearAll); $('#w-clear-top').addEventListener('click', clearAll);
-    $('#wf').addEventListener('click', e => { const b = e.target.closest('[data-clear]'); if (!b) return; e.preventDefault(); const k = b.dataset.clear, inp = b.previousElementSibling; d()[k] = ''; inp.value = ''; if (k === 'cvNo') d().cvAuto = true; updateWrite(); if (k === 'cvNo') inp.value = d().cvNo; inp.focus(); });
+    $('#wf').addEventListener('click', e => { const b = e.target.closest('[data-clear]'); if (!b) return; e.preventDefault(); const k = b.dataset.clear, inp = b.previousElementSibling; d()[k] = ''; inp.value = ''; if (k === 'cvNo') d().cvAuto = true; if (k === 'reviewedBy' || k === 'approvedBy') d().sigAuto = false; updateWrite(); if (k === 'cvNo') inp.value = d().cvNo; inp.focus(); });
     $('#w-test').addEventListener('click', async () => { const {acct, L} = syncDraftAuto(); const lay = L || getLayout('std-BDO'); const data = writeData(app.draft, acct); if (!data.amount) Object.assign(data, sampleData(lay), {acctNo: data.acctNo || '001234567890'}); await saveFile(`Alignment-test-${lay.bank}.pdf`, checkPdf(lay, data, true)); });
     $('#wf').addEventListener('submit', e => { e.preventDefault(); if (checkRequired()) issueCheck(); });
     fillWriteInputs();
@@ -945,8 +962,10 @@ function fillWriteInputs() {
   $('#w-words').value = d.words; $('#w-wm').checked = d.wordsManual; $('#w-words').readOnly = !d.wordsManual;
   $('#w-cv').value = d.cvNo; $('#w-ac').checked = d.acPayee; $('#w-part').value = d.particulars; $('#w-alsov').checked = d.alsoVoucher;
   supplierFromPayee(d); fillSupplier(); $('#w-ptype').value = d.payType || ''; $('#w-ref').value = d.refNo || ''; $('#w-apv').value = d.apvNo || '';
-  renderEntries();
+  fillSig(); renderEntries();
 }
+function fillSig() { const d = app.draft, r = $('#w-rev'), a = $('#w-appr'); if (r && document.activeElement !== r) r.value = d.reviewedBy || ''; if (a && document.activeElement !== a) a.value = d.approvedBy || ''; }
+function fillSigNames() { const dl = $('#w-signames'); if (dl) dl.innerHTML = sigNames().map(x => `<option value="${esc(x)}">`).join(''); }
 function fillSupplier() { const d = app.draft; $('#w-scode').value = d.supCode || ''; $('#w-saddr').value = d.supAddr || ''; $('#w-stin').value = d.supTin || ''; }
 function renderEntries() {
   $('#w-ent-body').innerHTML = app.draft.entries.map((e, i) => `<tr><td><input data-i="${i}" data-k="acct" value="${esc(e.acct)}" placeholder="Account title" aria-label="Account title"></td><td><input data-i="${i}" data-k="dr" class="mono" value="${esc(e.dr)}" placeholder="Debit" inputmode="decimal" aria-label="Debit"></td><td><input data-i="${i}" data-k="cr" class="mono" value="${esc(e.cr)}" placeholder="Credit" inputmode="decimal" aria-label="Credit"></td><td><button type="button" class="btn sm" data-del="${i}" aria-label="Remove line">×</button></td></tr>`).join('');
@@ -1039,7 +1058,7 @@ async function issueCheck() {
   } catch (e) { writeErr(e); btn.disabled = false; return; }
   app.last = {accountId: acct.id, no};
   const alsoV = d.alsoVoucher;
-  app.draft = newDraft(acct.id); app.draft.alsoVoucher = alsoV; app.draft.date = d.date;
+  app.draft = keepSig(newDraft(acct.id), d); app.draft.alsoVoucher = alsoV; app.draft.date = d.date;
   fillWriteInputs(); updateWrite(true);
   toast(`Check ${padNo(acct, no)} saved to the register.`);
   const full = {...rec, no, accountId: acct.id, noStr: padNo(acct, no)};
@@ -1233,7 +1252,7 @@ async function delSubmit(e) {
   toast(`Check ${padNo(a, no)} deleted from the register.`);
   if (!reissue) { renderRegister(); return; }
   const d = newDraft(acctId);
-  Object.assign(d, {no: no > 0 ? String(no) : "", noAuto: false, date: r.date || todayISO(), payee: r.payee || '', amount: r.amount ? peso(r.amount) : '', particulars: r.particulars || '', cvNo: r.cvNo || '', cvAuto: !r.cvNo, acPayee: !!r.acPayee, alsoVoucher: app.draft.alsoVoucher, ...(r.voucher ? {supCode: r.voucher.supplierCode || '', supAddr: r.voucher.supplierAddress || '', supTin: r.voucher.supplierTin || '', supAuto: false, payType: r.voucher.payType || 'AP', refNo: r.voucher.refNo || '', apvNo: r.voucher.apvNo || ''} : {})});
+  Object.assign(d, {no: no > 0 ? String(no) : "", noAuto: false, date: r.date || todayISO(), payee: r.payee || '', amount: r.amount ? peso(r.amount) : '', particulars: r.particulars || '', cvNo: r.cvNo || '', cvAuto: !r.cvNo, acPayee: !!r.acPayee, alsoVoucher: app.draft.alsoVoucher, ...(r.voucher ? {supCode: r.voucher.supplierCode || '', supAddr: r.voucher.supplierAddress || '', supTin: r.voucher.supplierTin || '', supAuto: false, payType: r.voucher.payType || 'AP', refNo: r.voucher.refNo || '', apvNo: r.voucher.apvNo || ''} : {}), ...(r.voucher?.reviewedBy || r.voucher?.approvedBy ? {reviewedBy: r.voucher.reviewedBy || '', approvedBy: r.voucher.approvedBy || '', sigAuto: false, sigCo: r.companyId || ''} : {})});
   if (r.entries?.length) d.entries = r.entries.map(x => ({acct: x.acct || '', dr: x.dr ? String(x.dr) : '', cr: x.cr ? String(x.cr) : ''}));
   if (app.company !== 'ALL' && app.company !== r.companyId) { app.company = 'ALL'; lsSet('mtc-co', 'ALL'); }
   app.draft = d; app.last = null; go('write');

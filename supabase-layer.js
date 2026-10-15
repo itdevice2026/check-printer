@@ -118,7 +118,7 @@ issueCheck = async function () {
   if (pm && Object.keys(upd).length) { try { applyRow('cp_payees', await must(SB.from('cp_payees').update(upd).eq('id', pm.id).select().single())); } catch (e) { console.error(e); } }
   app.last = {accountId: acct.id, no};
   const alsoV = d.alsoVoucher;
-  app.draft = newDraft(acct.id); app.draft.alsoVoucher = alsoV; app.draft.date = d.date;
+  app.draft = keepSig(newDraft(acct.id), d); app.draft.alsoVoucher = alsoV; app.draft.date = d.date;
   fillWriteInputs(); updateWrite(true);
   toast(`Saved to the register: ${row.ref_no || padNo(acct, no)}${no > 0 ? ` (check #${padNo(acct, no)})` : ''}.`);
   const rec = ckFromRow(row); const full = {...rec, no, accountId: acct.id, noStr: padNo(acct, no)};
