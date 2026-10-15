@@ -42,7 +42,7 @@ function applyRow(table, row, deleted) {
     else { const bid = bucketId(row.account_id, +row.check_no); const b = m[bid] || {accountId: row.account_id, checks: {}}; m[bid] = {accountId: row.account_id, checks: {...b.checks, [+row.check_no]: ckFromRow(row)}}; }
     S.checks = m;
   }
-  else if (table === 'cp_audit') { const e = {...(S.audit.all?.entries || {})}; e[row.id] = {t: row.at, by: row.user_id, byName: row.user_email, action: row.action, detail: row.detail}; S.audit = {all: {entries: e}}; }
+  else if (table === 'cp_audit') { const e = {...(S.audit.all?.entries || {})}; if (deleted) { delete e[row.id]; S.audit = {all: {entries: e}}; } else e[row.id] = {t: row.at, by: row.user_id, byName: row.user_email, action: row.action, detail: row.detail}; S.audit = {all: {entries: e}}; }
   else if (table === 'cp_allowed_users') { CP_USERS = CP_USERS.filter(u => u.email !== row.email); if (!deleted) CP_USERS.push(row); }
   else if (table === 'cp_payees') { CP_PAYEES = CP_PAYEES.filter(p => p.id !== row.id); if (!deleted) CP_PAYEES.push(row); }
   scheduleRender();
@@ -323,6 +323,83 @@ function showPwReset(u) {
   });
   $('#cp-pwv').focus(); $('#cp-pwv').select();
 }
+
+/* ---------- clear the audit log (admins) ---------- */
+// Read every audit row (the screen only loads the latest 300), oldest first, optionally only those before a Manila date.
+async function auditRowsAll(before) {
+  let out = [], from = 0;
+  for (;;) {
+    let q = SB.from('cp_audit').select('*').order('at', {ascending: true}).range(from, from + 999);
+    if (before) q = q.lt('at', before + 'T00:00:00+08:00');
+    const rows = await must(q); out = out.concat(rows); if (rows.length < 1000) return out; from += 1000;
+  }
+}
+async function auditXlsx(rows, label) {
+  if (!window.XLSX) throw new Error('The Excel library did not load. Check your connection and reload.');
+  const data = rows.map(r => ({'When (PH time)': phTime(r.at), 'Who': r.user_email || '', 'Action': r.action || '', 'Details': r.detail || ''}));
+  const ws = XLSX.utils.json_to_sheet(data.length ? data : [{'When (PH time)': '', 'Who': '', 'Action': '', 'Details': ''}]); ws['!cols'] = [22, 30, 26, 80].map(w => ({wch: w}));
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Audit log');
+  return saveFile(`Check-Printer-Audit-Log-${label}-${todayISO()}.xlsx`, new Blob([XLSX.write(wb, {bookType: 'xlsx', type: 'array'})]));
+}
+function showAuditClear() {
+  if ($('#cp-aclr')) { $('#cp-aclr').remove(); return; }
+  const head = $('#cp-aclr-btn')?.closest('.sec-head'); if (!head) return;
+  head.insertAdjacentHTML('afterend', `<form class="card form" id="cp-aclr" style="margin-bottom:12px;border-color:var(--bad,#b42318)">
+    <h3 style="margin:0">Clear audit log</h3>
+    <div class="row"><label class="f">What to clear<select id="cp-aclr-scope"><option value="all">All entries</option><option value="before">Entries dated before…</option></select></label>
+      <label class="f" id="cp-aclr-dwrap" hidden>Before (PH date)<input type="date" id="cp-aclr-date" value="${todayISO()}"></label></div>
+    <label class="f">Reason (required, kept in the log)<input id="cp-aclr-reason" maxlength="200" required placeholder="e.g. Year-end archive; copy saved to the IT share"></label>
+    <label class="inline"><input type="checkbox" id="cp-aclr-xlsx" checked> Download an Excel copy of the entries first</label>
+    <label class="f"><span>Type <b>CLEAR</b> to confirm</span><input id="cp-aclr-ok" autocomplete="off" class="mono" style="max-width:160px"></label>
+    <p class="hint" style="margin:0" id="cp-aclr-count">Counting entries…</p>
+    <div class="msgs" id="cp-aclr-msg"></div>
+    <div class="actions"><button type="submit" class="btn danger" id="cp-aclr-go" disabled>Clear audit log</button><button type="button" class="btn" id="cp-aclr-cancel">Cancel</button></div>
+    <p class="hint" style="margin:0">Cleared entries cannot be brought back. One entry stays in the log saying who cleared it, when, how many entries and why.</p></form>`);
+  const f = $('#cp-aclr'), scope = () => $('#cp-aclr-scope').value, before = () => scope() === 'before' ? $('#cp-aclr-date').value : null;
+  let seq = 0;
+  const count = async () => {
+    const my = ++seq; $('#cp-aclr-count').textContent = 'Counting entries…';
+    try { let q = SB.from('cp_audit').select('id', {count: 'exact', head: true}); if (before()) q = q.lt('at', before() + 'T00:00:00+08:00');
+      const {count: n, error} = await q; if (error) throw error; if (my !== seq) return;
+      $('#cp-aclr-count').textContent = `${n} entr${n === 1 ? 'y' : 'ies'} will be cleared${before() ? ` (dated before ${phTime(before() + 'T00:00:00+08:00', false)})` : ''}.`;
+    } catch (e) { if (my === seq) $('#cp-aclr-count').textContent = 'Could not count the entries: ' + e.message; }
+  };
+  const valid = () => { $('#cp-aclr-go').disabled = !($('#cp-aclr-ok').value.trim().toUpperCase() === 'CLEAR' && $('#cp-aclr-reason').value.trim().length >= 3 && (scope() === 'all' || before())); };
+  $('#cp-aclr-scope').addEventListener('change', () => { $('#cp-aclr-dwrap').hidden = scope() !== 'before'; count(); valid(); });
+  $('#cp-aclr-date').addEventListener('change', () => { count(); valid(); });
+  f.addEventListener('input', valid);
+  $('#cp-aclr-cancel').addEventListener('click', () => f.remove());
+  f.addEventListener('submit', async e => {
+    e.preventDefault(); valid(); if ($('#cp-aclr-go').disabled) return;
+    const btn = $('#cp-aclr-go'), msg = $('#cp-aclr-msg'), reason = $('#cp-aclr-reason').value.trim(), bf = before();
+    btn.disabled = true; btn.textContent = 'Working…'; msg.innerHTML = '';
+    try {
+      if ($('#cp-aclr-xlsx').checked) {
+        const rows = await auditRowsAll(bf);
+        if (!(await auditXlsx(rows, bf ? 'before-' + bf : 'all'))) throw new Error('The Excel copy was not saved, so nothing was cleared.');
+      }
+      const n = await must(SB.rpc('cp_clear_audit', {p_reason: reason, p_before: bf}));
+      const au = await must(SB.from('cp_audit').select('*').order('at', {ascending: false}).limit(300));
+      S.audit = {}; au.forEach(r => applyRow('cp_audit', r));
+      toast(`Cleared ${n} audit entr${n === 1 ? 'y' : 'ies'}.`); renderCompanies();
+    } catch (err) {
+      console.error(err);
+      const missing = /cp_clear_audit|PGRST202|schema cache/i.test(err.message || '') || err.code === 'PGRST202';
+      msg.innerHTML = `<div class="msg bad">${missing ? 'The database is not set up for this yet. Run the update script check-printer-update-clear-audit.sql in the Supabase SQL Editor, then try again.' : esc(err.message || String(err))}</div>`;
+      btn.textContent = 'Clear audit log'; valid();
+    }
+  });
+  count(); $('#cp-aclr-reason').focus();
+}
+const _renderCompanies4 = renderCompanies;
+renderCompanies = function (force) {
+  if (force === false && $('#cp-aclr')) return; // keep the open Clear audit log form while live updates arrive
+  _renderCompanies4(force);
+  if (CP_ROLE !== 'admin' || $('#cp-aclr-btn')) return;
+  const h = [...$$('#tab-companies .sec-head')].find(x => x.querySelector('h2')?.textContent.trim() === 'Audit log'); if (!h) return;
+  h.insertAdjacentHTML('beforeend', `<button type="button" class="btn sm" id="cp-aclr-btn" style="margin-left:auto">Clear audit log…</button>`);
+  $('#cp-aclr-btn').addEventListener('click', showAuditClear);
+};
 
 /* ---------- user management (admins) ---------- */
 const _renderCompanies = renderCompanies;
