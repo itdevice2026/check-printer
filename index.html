@@ -882,7 +882,7 @@ function renderWrite(force) {
     mounted.write = true;
     el.innerHTML = `<div class="split">
       <form id="wf" class="card form" autocomplete="off" novalidate>
-        <div class="sec-head"><h2>New check</h2><div class="actions"><span class="hint" id="w-series"></span><label class="inline" style="font-weight:600"><input type="checkbox" id="w-ac"> Cross: A/C PAYEE ONLY</label><button type="button" class="btn sm" id="w-clear-top" title="Clear payee, amount, words, CV no., particulars and entries">Clear form</button></div></div>
+        <div class="sec-head"><h2>New check</h2><div class="actions"><label class="inline" style="font-weight:600"><input type="checkbox" id="w-ac"> Cross: A/C PAYEE ONLY</label><button type="button" class="btn sm" id="w-clear-top" title="Clear payee, amount, words, CV no., particulars and entries">Clear form</button></div></div>
         <label class="f">Bank account<select id="w-acct"></select></label>
         <div class="row">
           <label class="f"><span>Check no. <span class="hint" style="font-weight:400">(optional)</span></span><input id="w-no" class="mono" inputmode="numeric"></label>
@@ -986,7 +986,6 @@ function updateWrite(refreshSelect) {
   if (d.noAuto && document.activeElement !== $('#w-no')) $('#w-no').value = d.no;
   if (d.cvAuto && document.activeElement !== $('#w-cv')) $('#w-cv').value = d.cvNo;
   if (!d.wordsManual) $('#w-words').value = d.words;
-  { const last = acct ? lastCheckNo(acct.id) : 0; $('#w-series').textContent = last ? `Last check no. ${padNo(acct, last)}` : ''; }
   const lay = L || getLayout('std-BDO');
   $('#w-layname').textContent = lay.name;
   const data = writeData(d, acct);
@@ -1106,7 +1105,7 @@ function renderRegister() {
       <div id="r-bulkbox"></div>
       <div class="table-wrap"><table class="t"><thead><tr><th>Ref no.</th><th>Date</th><th>Payee</th><th class="r">Amount</th><th>Account</th><th>CV no.</th><th>Status</th><th></th></tr></thead><tbody id="r-body"></tbody></table></div>
       <div class="section"><div class="sec-head"><h2>Summary by bank account</h2><span class="hint">Uses the company, date and search filters above</span></div>
-      <div class="table-wrap"><table class="t"><thead><tr><th>Account</th><th>Company</th><th>Last check no.</th><th class="r">Checks</th><th class="r">Outstanding</th><th class="r">Cleared</th><th class="r">Voided</th></tr></thead><tbody id="r-sum"></tbody></table></div></div>`;
+      <div class="table-wrap"><table class="t"><thead><tr><th>Account</th><th>Company</th><th class="r">Checks</th><th class="r">Outstanding</th><th class="r">Cleared</th><th class="r">Voided</th></tr></thead><tbody id="r-sum"></tbody></table></div></div>`;
     const f = app.reg;
     $('#r-acct').addEventListener('change', e => { f.account = e.target.value; renderRegister(); });
     $('#r-st').addEventListener('change', e => { f.status = e.target.value; renderRegister(); });
@@ -1136,7 +1135,7 @@ function renderRegister() {
   // spoiled leaf form
   if (app._spoilShown !== app.spoiledOpen || !app.spoiledOpen) { app._spoilShown = app.spoiledOpen;
   $('#r-spoilbox').innerHTML = app.spoiledOpen ? `<form class="card form" style="margin-bottom:12px"><h2>Record a spoiled or cancelled leaf</h2><p class="hint" style="margin:0">Use this for a leaf that was damaged or misprinted before it was issued, so the number is accounted for.</p><div class="row"><label class="f">Account<select id="sp-acct" required>${accts.map(a => `<option value="${a.id}">${esc(acctLabel(a))}</option>`).join('')}</select></label><label class="f">Check no.<input id="sp-no" class="mono" inputmode="numeric" required></label><label class="f">Reason<input id="sp-reason" required placeholder="e.g. Misaligned print, torn leaf"></label></div><div class="actions"><button class="btn primary">Save as voided</button><button type="button" class="btn" id="sp-cancel">Cancel</button></div></form>` : '';
-  if (app.spoiledOpen && accts.length) { const a = S.accounts[$('#sp-acct').value]; if (a) $('#sp-no').value = a.nextNo || ''; $('#sp-acct').addEventListener('change', e => { $('#sp-no').value = S.accounts[e.target.value]?.nextNo || ''; }); } }
+  if (app.spoiledOpen && accts.length) { const a = S.accounts[$('#sp-acct').value];  } }
   // rows
   const body = rows.slice(0, 500).map(r => {
     const st = effStatus(r), a = S.accounts[r.accountId], key = r.accountId + '|' + r.no;
@@ -1157,10 +1156,10 @@ function renderRegister() {
   renderBulk(rows);
   // summary
   $('#r-sum').innerHTML = accts.map(a => {
-    const rs = rows.filter(r => r.accountId === a.id); const last = lastCheckNo(a.id);
+    const rs = rows.filter(r => r.accountId === a.id);
     const sum = l => peso(l.reduce((s, r) => s + (r.amount || 0), 0));
-    return `<tr><td>${esc(acctLabel(a))}</td><td>${esc(coName(a.companyId))}</td><td class="mono">${last ? padNo(a, last) : '—'}</td><td class="r mono">${rs.length}</td><td class="r mono">${sum(rs.filter(r => !['Cleared','Voided'].includes(effStatus(r))))}</td><td class="r mono">${sum(rs.filter(r => r.status === 'Cleared'))}</td><td class="r mono">${rs.filter(r => r.status === 'Voided').length}</td></tr>`;
-  }).join('') || `<tr><td colspan="7" class="empty">No bank accounts yet.</td></tr>`;
+    return `<tr><td>${esc(acctLabel(a))}</td><td>${esc(coName(a.companyId))}</td><td class="r mono">${rs.length}</td><td class="r mono">${sum(rs.filter(r => !['Cleared','Voided'].includes(effStatus(r))))}</td><td class="r mono">${sum(rs.filter(r => r.status === 'Cleared'))}</td><td class="r mono">${rs.filter(r => r.status === 'Voided').length}</td></tr>`;
+  }).join('') || `<tr><td colspan="6" class="empty">No bank accounts yet.</td></tr>`;
 }
 // Bulk delete (administrators only): tick checks in the register, give one reason, delete them all. Each deletion is written to the audit log.
 function renderBulk(rows) {
@@ -1317,8 +1316,8 @@ function renderAccounts(force = true) {
     </form>` : `<div class="card form"><h2>Bank accounts</h2><p class="muted" style="margin:0">Each account holds the bank details and the print layout calibrated for that bank's leaf. The check number is typed on each check.</p>
       ${cos.length ? `<div class="actions"><button class="btn primary" id="a-new">Add bank account</button></div>` : `<div class="msg warn">Add a company first. <a data-go="companies">Open Companies</a></div>`}</div>`}
     </div>
-    <div class="table-wrap"><table class="t"><thead><tr><th>Bank / account</th><th>Company</th><th>Last check no.</th><th>Layout</th><th></th></tr></thead><tbody>
-    ${accts.map(a => `<tr><td><b>${esc(bankName(a.bank))}</b>${a.active === false ? ' <span class="st st-Post-dated">inactive</span>' : ''}<div class="hint mono">${esc(a.number || '')}${a.branch ? ' · ' + esc(a.branch) : ''}</div><div class="hint">${esc(a.name || '')}</div></td><td>${esc(coName(a.companyId))}</td><td class="mono">${lastCheckNo(a.id) ? padNo(a, lastCheckNo(a.id)) : '—'}</td><td>${esc(allLayouts()[a.layoutId]?.name || 'Standard')}</td><td><button class="btn sm" data-aedit="${a.id}">Edit</button></td></tr>`).join('') || `<tr><td colspan="6" class="empty">No bank accounts${app.company !== 'ALL' ? ' for this company' : ''} yet.</td></tr>`}
+    <div class="table-wrap"><table class="t"><thead><tr><th>Bank / account</th><th>Company</th><th>Layout</th><th></th></tr></thead><tbody>
+    ${accts.map(a => `<tr><td><b>${esc(bankName(a.bank))}</b>${a.active === false ? ' <span class="st st-Post-dated">inactive</span>' : ''}<div class="hint mono">${esc(a.number || '')}${a.branch ? ' · ' + esc(a.branch) : ''}</div><div class="hint">${esc(a.name || '')}</div></td><td>${esc(coName(a.companyId))}</td><td>${esc(allLayouts()[a.layoutId]?.name || 'Standard')}</td><td><button class="btn sm" data-aedit="${a.id}">Edit</button></td></tr>`).join('') || `<tr><td colspan="6" class="empty">No bank accounts${app.company !== 'ALL' ? ' for this company' : ''} yet.</td></tr>`}
     </tbody></table></div></div>`;
   $('#a-new')?.addEventListener('click', () => { app.acctEdit = {companyId: app.company !== 'ALL' ? app.company : cos[0]?.id, bank: 'BDO', branch: '', name: S.companies[app.company]?.name || '', number: '', seriesFrom: 0, seriesTo: 0, nextNo: 0, digits: 10, active: true}; renderAccounts(); });
   $$('[data-aedit]').forEach(b => b.addEventListener('click', () => { const a = S.accounts[b.dataset.aedit]; app.acctEdit = {...clone(a), id: b.dataset.aedit, seriesFromStr: padNo(a, a.seriesFrom), seriesToStr: padNo(a, a.seriesTo)}; renderAccounts(); window.scrollTo({top: 0}); }));
@@ -1448,7 +1447,7 @@ function selectField(f) { if (app.layoutSel === f) return; app.layoutSel = f; $$
 function refreshLayoutPreview() {
   const L = app.layoutDraft; if (!$('#l-leaf')) return;
   const u = accountList('ALL').find(a => (a.layoutId || 'std-' + a.bank) === app.layoutId);
-  const sd = {...sampleData(L), ...(u ? {acctNo: u.number, acctName: u.name, branch: u.branch, brstn: u.brstn, noStr: padNo(u, u.nextNo)} : {})};
+  const sd = {...sampleData(L), ...(u ? {acctNo: u.number, acctName: u.name, branch: u.branch, brstn: u.brstn, noStr: padNo(u, 1)} : {})};
   $('#l-leaf').innerHTML = leafSVG(L, sd, {editable: layoutEditable(), selected: app.layoutSel, plain: !app.layoutDesign});
   const F = L.fields[app.layoutSel]; $('#l-pos').textContent = F ? `${app.layoutSel}  x ${r1(+F.x)}  y ${r1(+F.y)} mm` : '';
 }
