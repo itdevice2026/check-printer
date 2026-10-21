@@ -335,7 +335,7 @@ const effBold = () => !!PRINT.bold;
 // Letter weight (all banks): thin / regular / heavy. Thin trims every letter outline with a white edge (no ink), so the strokes
 // print noticeably finer than the font's regular weight; heavy outlines them in black. Width scales with the letter size.
 const effWeight = () => PRINT.heavy ? 'heavy' : PRINT.thin ? 'thin' : 'regular';
-const THIN_K = 0.011; // mm of white edge per pt of letter size (12 pt -> 0.13 mm, about a third of Tahoma's regular stem)
+const THIN_K = 0.0075; // mm of white edge per pt of letter size (12 pt -> 0.09 mm, about a fifth of Tahoma's regular stem)
 const WEIGHT_OPTS = [['thin', 'Thin'], ['regular', 'Regular'], ['heavy', 'Extra dark (dot-matrix)']];
 const effFont = () => (PRINT.font && PFONT[PRINT.font]) ? PRINT.font : 'helvetica'; // one font for every bank
 const pf = L => PFONT[effFont(L)];
