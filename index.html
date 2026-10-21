@@ -334,9 +334,9 @@ async function savePrintSettings(upd) { Object.assign(PRINT, upd); lsSet('cp-pri
 const effBold = () => !!PRINT.bold;
 // Letter weight (all banks): thin / regular / heavy. Thin trims every letter outline with a white edge (no ink), so the strokes
 // print noticeably finer than the font's regular weight; heavy outlines them in black. Width scales with the letter size.
-const effWeight = () => PRINT.heavy ? 'heavy' : PRINT.thin ? 'thin' : 'regular';
+const effWeight = () => PRINT.heavy ? 'heavy' : 'regular'; // Thin was removed 2026-10-21: it washed out to unreadable grey on screen and on the LX-310
 const THIN_K = 0.0075; // mm of white edge per pt of letter size (12 pt -> 0.09 mm, about a fifth of Tahoma's regular stem)
-const WEIGHT_OPTS = [['thin', 'Thin'], ['regular', 'Regular'], ['heavy', 'Extra dark (dot-matrix)']];
+const WEIGHT_OPTS = [['regular', 'Regular'], ['heavy', 'Extra dark (dot-matrix)']];
 const effFont = () => (PRINT.font && PFONT[PRINT.font]) ? PRINT.font : 'helvetica'; // one font for every bank
 const pf = L => PFONT[effFont(L)];
 // Tahoma is a Windows font, so it is not shipped with the site: each PC loads its own C:\Windows\Fonts\tahoma.ttf (and tahomabd.ttf
@@ -848,7 +848,7 @@ function renderFonts() {
       <div class="actions" style="margin:0" role="radiogroup" aria-label="Letter weight"><b style="font-size:13px">Letter weight:</b>
         ${WEIGHT_OPTS.map(([v, t]) => `<label class="inline"><input type="radio" name="g-weight" value="${v}" ${effWeight() === v ? 'checked' : ''} ${admin ? '' : 'disabled'}> ${t}</label>`).join('')}
       </div>
-      <p class="hint" style="margin:0">Bold is off by default. If letters look thin or broken on the dot-matrix printer (Epson LX-310), tick <b>Bold print</b> or choose <b>Extra dark</b>, or try Courier. <b>Thin</b> prints finer, lighter letters than Regular (best with Bold off), and set the printer's Print Quality to High (not Draft).</p>
+      <p class="hint" style="margin:0">Bold is off by default. If letters look thin or broken on the dot-matrix printer (Epson LX-310), tick <b>Bold print</b> or choose <b>Extra dark</b>, or try Courier., and set the printer's Print Quality to High (not Draft).</p>
       <h2 style="margin-top:8px">Tahoma on this PC</h2>
       ${tahomaReady() ? `<div class="msg good" style="margin:0">Tahoma is loaded on this PC${TAHOMA.bold ? ' (regular and bold)' : ' (regular only: also load tahomabd.ttf for bold print)'}. <a data-loadtahoma>Load again</a></div>`
         : `<div class="msg ${f === 'tahoma' ? 'warn' : 'info'}" style="margin:0">${tahomaHint()}</div>`}
