@@ -18,7 +18,7 @@ let CP_SESSION = null, CP_ROLE = null, CP_USERS = [], CP_CHANNEL = null, CP_PAYE
 const PRINT_ROW = '_print-settings';
 savePrintSettings = async function (upd) {
   const prev = {...PRINT}; Object.assign(PRINT, upd);
-  try { await must(SB.from('cp_layouts').upsert({id: PRINT_ROW, data: {font: PRINT.font, bold: !!PRINT.bold, heavy: !!PRINT.heavy, settings: true}}).select().single()); }
+  try { await must(SB.from('cp_layouts').upsert({id: PRINT_ROW, data: {font: PRINT.font, bold: !!PRINT.bold, heavy: !!PRINT.heavy, thin: !PRINT.heavy && !!PRINT.thin, settings: true}}).select().single()); }
   catch (e) { Object.assign(PRINT, prev); throw e; }
 };
 
@@ -34,7 +34,7 @@ function applyRow(table, row, deleted) {
   if (!row) return;
   if (table === 'cp_companies') { const m = {...S.companies}; if (deleted) delete m[row.id]; else m[row.id] = coFromRow(row); S.companies = m; }
   else if (table === 'cp_accounts') { const m = {...S.accounts}; if (deleted) delete m[row.id]; else m[row.id] = acFromRow(row); S.accounts = m; }
-  else if (table === 'cp_layouts' && row.id === PRINT_ROW) { PRINT.font = deleted ? '' : (row.data?.font || ''); PRINT.bold = !deleted && !!row.data?.bold; PRINT.heavy = !deleted && !!row.data?.heavy; mounted.layouts = false; }
+  else if (table === 'cp_layouts' && row.id === PRINT_ROW) { PRINT.font = deleted ? '' : (row.data?.font || ''); PRINT.bold = !deleted && !!row.data?.bold; PRINT.heavy = !deleted && !!row.data?.heavy; PRINT.thin = !deleted && !PRINT.heavy && !!row.data?.thin; mounted.layouts = false; }
   else if (table === 'cp_layouts') { const m = {...S.layouts}; if (deleted) delete m[row.id]; else m[row.id] = row.data; S.layouts = m; if (!app.layoutDirty) app.layoutDraft = null; mounted.layouts = false; }
   else if (table === 'cp_checks') {
     const m = {...S.checks};
@@ -153,7 +153,7 @@ async function loadAll() {
   const [cos, acs, lays, cks, au, users, pays] = await Promise.all([all('cp_companies', 'id'), all('cp_accounts', 'id'), all('cp_layouts', 'id'), all('cp_checks', 'id'),
     must(SB.from('cp_audit').select('*').order('at', {ascending: false}).limit(300)), must(SB.from('cp_allowed_users').select('*').order('email')), all('cp_payees', 'name')]);
   S = {companies: {}, accounts: {}, layouts: {}, checks: {}, audit: {}};
-  cos.forEach(r => S.companies[r.id] = coFromRow(r)); acs.forEach(r => S.accounts[r.id] = acFromRow(r)); PRINT.font = ''; PRINT.bold = false; PRINT.heavy = false; lays.forEach(r => { if (r.id === PRINT_ROW) { PRINT.font = r.data?.font || ''; PRINT.bold = !!r.data?.bold; PRINT.heavy = !!r.data?.heavy; } else S.layouts[r.id] = r.data; });
+  cos.forEach(r => S.companies[r.id] = coFromRow(r)); acs.forEach(r => S.accounts[r.id] = acFromRow(r)); PRINT.font = ''; PRINT.bold = false; PRINT.heavy = false; PRINT.thin = false; lays.forEach(r => { if (r.id === PRINT_ROW) { PRINT.font = r.data?.font || ''; PRINT.bold = !!r.data?.bold; PRINT.heavy = !!r.data?.heavy; PRINT.thin = !PRINT.heavy && !!r.data?.thin; } else S.layouts[r.id] = r.data; });
   cks.forEach(r => applyRow('cp_checks', r)); au.forEach(r => applyRow('cp_audit', r)); CP_USERS = users; CP_PAYEES = pays;
   if (CP_CHANNEL) SB.removeChannel(CP_CHANNEL);
   CP_CHANNEL = SB.channel('cp-live');
